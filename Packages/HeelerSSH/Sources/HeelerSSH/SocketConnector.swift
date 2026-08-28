@@ -2,12 +2,33 @@ import Darwin
 import Dispatch
 import Foundation
 
-enum SocketConnector {
+public enum SocketConnector {
+    /// Optional SOCKS5 proxy (embedded userspace Tailscale node). When set,
+    /// connections are dialed through the proxy instead of directly — the
+    /// proxy resolves hostnames (MagicDNS) and rides the tailnet. This is how
+    /// Heeler reaches tailnet hosts without registering a system VPN, so it
+    /// coexists with an always-on proxy app (e.g. LOON).
+    public static var socks5Proxy: SOCKS5Connector.ProxyEndpoint? {
+        get { _socks5Proxy }
+        set { _socks5Proxy = newValue }
+    }
+    private static nonisolated(unsafe) var _socks5Proxy: SOCKS5Connector.ProxyEndpoint?
+
     static func connect(
         to endpoint: SSHEndpoint,
         until deadline: ContinuousClock.Instant
     ) async throws -> Int32 {
-        try await connect(
+        // If a userspace Tailscale node is running, route tailnet-ward traffic
+        // through its local SOCKS5 proxy. DNS (including MagicDNS names)
+        // resolves proxy-side inside the node.
+        if let proxy = socks5Proxy {
+            return try await SOCKS5Connector.connect(
+                via: proxy,
+                to: endpoint.host,
+                targetPort: endpoint.port,
+                until: deadline)
+        }
+        return try await connect(
             to: endpoint,
             until: deadline,
             resolver: DNSServiceAddressResolver(),

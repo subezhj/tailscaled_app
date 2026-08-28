@@ -18,6 +18,7 @@ struct ContentView: View {
     @State private var terminalFonts = TerminalFontSettings()
     @State private var snippets = SnippetStore()
     @State private var appearance = AppAppearanceSettings()
+    @State private var tailnet = TailnetNodeController()
     @State private var relaySettings: NotificationRelaySettings
     @State private var bannerStore: AgentNotificationBannerStore
     @State private var liveActivities: HostLiveActivityCoordinator
@@ -103,7 +104,8 @@ struct ContentView: View {
             notificationRouter: notificationRouter,
             bannerStore: bannerStore,
             liveActivities: liveActivities,
-            activity: activity
+            activity: activity,
+            tailnet: tailnet
         )
         // The one place the app's light/dark override is applied: it lands on
         // the window, so sheets, pushed screens, and the UIKit terminal
@@ -113,6 +115,13 @@ struct ContentView: View {
             console.setHosts(hostStore.hosts)
             notificationPreferences.setHosts(hostStore.hosts)
             await console.resume()
+        }
+        // Bring up the embedded userspace Tailscale node on launch so SSH to
+        // tailnet hosts rides the loopback SOCKS5 proxy immediately (it
+        // coexists with any system VPN — no NEPacketTunnelProvider). The node
+        // stays up across Host connections; Settings › Tailnet shows status.
+        .task {
+            tailnet.start()
         }
         .onChange(of: hostStore.hosts) {
             console.setHosts(hostStore.hosts)

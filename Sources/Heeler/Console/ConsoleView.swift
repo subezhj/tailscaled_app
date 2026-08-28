@@ -21,6 +21,9 @@ struct ConsoleView: View {
     /// Scene phase widened by the background grace period; an Attach screen
     /// pauses its work on real suspensions only.
     let activity: AppActivityCoordinator
+    /// Embedded userspace Tailscale node (no system VPN); SSH to tailnet hosts
+    /// rides its loopback SOCKS5 proxy when active.
+    let tailnet: TailnetNodeController
     @State private var hostSheet: HostSheet?
     @State private var isStartingAgent = false
     @State private var isShowingSettings = false
@@ -138,7 +141,8 @@ struct ConsoleView: View {
                         pushRegistration: pushRegistration,
                         notificationPreferences: notificationPreferences,
                         relaySettings: relaySettings,
-                        liveActivities: liveActivities)
+                        liveActivities: liveActivities,
+                        tailnet: tailnet)
                 }
         } detail: {
             detail

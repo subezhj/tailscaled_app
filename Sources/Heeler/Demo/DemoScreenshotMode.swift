@@ -73,7 +73,8 @@
                 notificationRouter: notificationRouter,
                 bannerStore: bannerStore,
                 liveActivities: liveActivities,
-                activity: activity
+                activity: activity,
+                tailnet: TailnetNodeController()
             )
             .preferredColorScheme(appearance.preferredColorScheme)
             .task {

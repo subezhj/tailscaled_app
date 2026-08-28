@@ -37,6 +37,9 @@ struct SettingsView: View {
     let notificationPreferences: NotificationPreferencesStore
     let relaySettings: NotificationRelaySettings
     let liveActivities: HostLiveActivityCoordinator
+    /// Embedded userspace Tailscale node; SSH to tailnet hosts rides its
+    /// loopback SOCKS5 proxy when active.
+    let tailnet: TailnetNodeController
     @Environment(\.dismiss) private var dismiss
 
     static let repositoryURL = URL(string: "https://github.com/ZingerLittleBee/Heeler")
@@ -96,6 +99,11 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
+                    NavigationLink {
+                        TailnetSettingsView(controller: tailnet)
+                    } label: {
+                        Label("Tailnet", systemImage: "network")
+                    }
                     NavigationLink {
                         NotificationSettingsView(
                             pushRegistration: pushRegistration,

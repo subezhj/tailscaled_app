@@ -19,6 +19,11 @@ packages:
   # checked-in native artifacts. The one SSH backend (ADR 0011).
   HeelerSSH:
     path: Packages/HeelerSSH
+  # Repository-local package wrapping the TailscaleKit.xcframework built from
+  # the libtailscale submodule (ThirdParty/libtailscale). The framework itself
+  # is a CI build artifact, not checked in (see ipa.yml).
+  TailscaleKit:
+    path: Packages/TailscaleKit
   # Pinned because this package embeds a prebuilt libghostty XCFramework and
   # libghostty's public API is still evolving independently from Ghostty.
   GhosttyTerminal:
@@ -85,6 +90,7 @@ targets:
         INFOPLIST_KEY_NSSupportsLiveActivities: YES
     dependencies:
       - package: HeelerSSH
+      - package: TailscaleKit
       - package: GhosttyTerminal
       - package: GhosttyTerminal
         product: GhosttyTheme

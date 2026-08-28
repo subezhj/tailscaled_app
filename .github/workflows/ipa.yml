@@ -1,0 +1,188 @@
+# Build an installable IPA entirely on GitHub-hosted macOS — no local Mac
+# needed. This is the "build your own Heeler+Tailscale IPA in the cloud"
+# workflow the project relies on for sideloading (TrollStore / Sideloadly /
+# AltStore / Feather) or ad-hoc dev installs.
+#
+# What it does:
+#   1. Check out the repo + libtailscale submodule.
+#   2. Build TailscaleKit.xcframework from the submodule (Go engine +
+#      Swift bindings) via `make ios-fat`.
+#   3. Stage the framework where the local SPM package expects it.
+#   4. Regenerate the Xcode project (project.yml is source of truth).
+#   5. Archive + export an IPA.
+#
+# Signing: two modes, chosen with the `signing` workflow input.
+#   - `unsigned` (default): no certs anywhere. xcodebuild archives with
+#     CODE_SIGNING_ALLOWED=NO and the workflow extracts a raw .app into an
+#     unsigned .ipa that a signing tool (e.g. Sideloadly, or a TrollStore
+#     remount tool) can process. The iOS App Store / dev-required entitlements
+#     (keychain access groups, app groups) will need to be signed on-device
+#     later, so this is best for TrollStore-style installs or when you only
+#     need the .app bundle.
+#   - `development`: uses an Apple Developer cert + provisioning profile
+#     supplied as GitHub secrets. Set SIGNING_CERT_BASE64 and
+#     SIGNING_PROFILE_BASE64, then the export signs with `development` method
+#     (dev-signed for your registered devices). Requires an Apple Developer
+#     account ($99/yr). This produces a directly-installable IPA.
+#
+# Trigger: workflow_dispatch (manual) — press "Run workflow" in the Actions tab.
+
+name: Build IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      signing:
+        description: "Signing mode (unsigned = sideload later, development = dev-signed IPA)"
+        required: true
+        default: "unsigned"
+        type: choice
+        options:
+          - unsigned
+          - development
+
+permissions:
+  contents: read
+
+jobs:
+  build-ipa:
+    name: Build IPA (${{ github.event.inputs.signing || 'unsigned' }})
+    runs-on: macos-26
+    timeout-minutes: 120
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.app/Contents/Developer
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install Go (for libtailscale)
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+
+      - name: Show toolchain
+        run: |
+          go version
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      # ---- Build the embedded Tailscale engine (libtailscale) ----
+      - name: Build TailscaleKit.xcframework (Go + iOS SDK)
+        run: |
+          cd ThirdParty/libtailscale/swift
+          make ios-fat
+
+      - name: Stage TailscaleKit.xcframework for SPM
+        run: |
+          mkdir -p Packages/TailscaleKit/Artifacts
+          cp -R ThirdParty/libtailscale/swift/build/Build/Products/Release-iphonefat/TailscaleKit.xcframework \
+                Packages/TailscaleKit/Artifacts/
+          ls -la Packages/TailscaleKit/Artifacts/TailscaleKit.xcframework
+
+      # ---- Regenerate the Xcode project from project.yml (XcodeGen) ----
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      # ---- Archive ----
+      - name: Archive (unsigned)
+        if: github.event.inputs.signing != 'development'
+        run: |
+          xcodebuild archive \
+            -project Heeler.xcodeproj -scheme Heeler \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/Heeler.xcarchive \
+            -allowProvisioningUpdates \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Import signing certificate + profile
+        if: github.event.inputs.signing == 'development'
+        run: |
+          set -euo pipefail
+          CERT_B64="${{ secrets.SIGNING_CERT_BASE64 }}"
+          PROFILE_B64="${{ secrets.SIGNING_PROFILE_BASE64 }}"
+          if [ -z "$CERT_B64" ] || [ -z "$PROFILE_B64" ]; then
+            echo "::error::development signing selected but SIGNING_CERT_BASE64 / SIGNING_PROFILE_BASE64 secrets are not set"
+            exit 1
+          fi
+          echo "$CERT_B64" | base64 --decode > /tmp/dist.p12
+          echo "$PROFILE_B64" | base64 --decode > /tmp/profile.mobileprovision
+          security create-keychain -p "$RANDOM$RANDOM" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$RANDOM$RANDOM" build.keychain
+          security import /tmp/dist.p12 -k build.keychain -P "${{ secrets.SIGNING_CERT_PASSWORD }}" -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$RANDOM$RANDOM" build.keychain
+          mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
+          cp /tmp/profile.mobileprovision ~/Library/MobileDevice/Provisioning\ Profiles/
+
+      - name: Archive (development signed)
+        if: github.event.inputs.signing == 'development'
+        run: |
+          xcodebuild archive \
+            -project Heeler.xcodeproj -scheme Heeler \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/Heeler.xcarchive \
+            -allowProvisioningUpdates \
+            -derivedDataPath build/DerivedData
+
+      # ---- Export ----
+      - name: Export IPA (unsigned .app)
+        if: github.event.inputs.signing != 'development'
+        run: |
+          # No provisioning profile to export against, so just package the
+          # unsigned .app into an .ipa that sideload tools accept.
+          mkdir -p build/ipa/Payload
+          cp -R build/Heeler.xcarchive/Products/Applications/Heeler.app build/ipa/Payload/
+          cd build/ipa && zip -qry ../Heeler-unsigned.ipa Payload
+          cd ../..
+          ls -la build/Heeler-unsigned.ipa
+
+      - name: Export IPA (development signed)
+        if: github.event.inputs.signing == 'development'
+        run: |
+          cat > build/ExportOptions.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key>
+            <string>development</string>
+            <key>signingStyle</key>
+            <string>automatic</string>
+            <key>stripSwiftSymbols</key>
+            <true/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath build/Heeler.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -exportPath build/ipa \
+            -allowProvisioningUpdates
+          mv build/ipa/Heeler.ipa build/Heeler-signed.ipa 2>/dev/null || true
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Heeler-IPA
+          path: |
+            build/Heeler-unsigned.ipa
+            build/Heeler-signed.ipa
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload .app (for the unsigned path)
+        if: github.event.inputs.signing != 'development'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Heeler-app-unsigned
+          path: build/Heeler.xcarchive/Products/Applications/Heeler.app
+          retention-days: 30

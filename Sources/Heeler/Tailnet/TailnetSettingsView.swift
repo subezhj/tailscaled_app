@@ -1,5 +1,22 @@
 import SwiftUI
 import AuthenticationServices
+import UIKit
+
+/// Provides the presentation anchor for `ASWebAuthenticationSession` on iOS.
+/// `ASWebAuthenticationPresentationContextProviding` is a class-bound
+/// (`NSObjectProtocol`) protocol, so a SwiftUI `struct` view cannot conform
+/// to it directly — this small `NSObject` bridges that.
+final class AuthPresentationContext: NSObject, ASWebAuthenticationPresentationContextProviding {
+    func presentationAnchor(
+        for session: ASWebAuthenticationSession
+    ) -> ASPresentationAnchor {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        if let key = scenes.flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) {
+            return key
+        }
+        return ASPresentationAnchor()
+    }
+}
 
 /// Tailnet setting surface: start/stop the embedded userspace Tailscale node,
 /// show connection state, and explain why there is no system VPN involved.
@@ -11,6 +28,7 @@ import AuthenticationServices
 struct TailnetSettingsView: View {
     @ObservedObject var controller: TailnetNodeController
     @State private var authSession: ASWebAuthenticationSession?
+    private let presentationContext = AuthPresentationContext()
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -98,7 +116,7 @@ struct TailnetSettingsView: View {
                     self.authSession = nil
                 }
             })
-        session.presentationContextProvider = self
+        session.presentationContextProvider = presentationContext
         session.prefersEphemeralWebBrowserSession = true
         authSession = session
         session.start()
@@ -130,17 +148,5 @@ struct TailnetSettingsView: View {
     private var ipv4Text: String? {
         if case .running(let ip) = controller.state { return ip }
         return nil
-    }
-}
-
-extension TailnetSettingsView: ASWebAuthenticationPresentationContextProviding {
-    func presentationAnchor(
-        for session: ASWebAuthenticationSession
-    ) -> ASPresentationAnchor {
-        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
-        if let key = scenes.flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) {
-            return key
-        }
-        return ASPresentationAnchor()
     }
 }

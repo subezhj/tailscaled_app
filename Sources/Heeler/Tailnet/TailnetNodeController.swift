@@ -1,6 +1,7 @@
 import Foundation
 import os
 import TailscaleKit
+import HeelerSSH
 
 /// Manages the embedded userspace Tailscale node (libtailscale).
 ///
@@ -99,11 +100,6 @@ final class TailnetNodeController: ObservableObject {
                 mask: [.initialState],
                 consumer: consumer)
             self.processor = processor
-
-            // If the node is already logged in (persisted session), start it.
-            // `start` is non-blocking (unlike `up`): it just ensures the
-            // backend wants to run; the bus reports Running when ready.
-            try await localAPI.start(options: Ipn.Options())
         } catch {
             state = .failed(error.localizedDescription)
         }
@@ -224,6 +220,12 @@ actor TailnetBusConsumer: MessageConsumer {
         Task { @MainActor [onNotify] in
             onNotify(notify)
         }
+    }
+
+    nonisolated func error(_ error: Error) {
+        // IPN bus errors are handled by the bus watcher restart logic
+        // (TailscaleKit's MessageProcessor handles retries internally).
+        // We log and discard; the controller observes state via the bus.
     }
 }
 

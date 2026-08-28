@@ -35,46 +35,9 @@ struct TailnetSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                Toggle("Tailnet Access", isOn: tailnetBinding)
-            } header: {
-                Text("Embedded Tailscale")
-            } footer: {
-                Text(
-                    "Runs a userspace Tailscale node — no system VPN is created, "
-                        + "so it coexists with your existing VPN/proxy app. SSH "
-                        + "connections to tailnet hosts ride this node.")
-            }
-
-            Section("Login") {
-                Button {
-                    requestLogin()
-                } label: {
-                    Label("Log In with Browser", systemImage: "globe")
-                }
-
-                Button {
-                    showAuthKeyPrompt = true
-                } label: {
-                    Label("Use Auth Key…", systemImage: "key")
-                }
-            } footer: {
-                Text(
-                    "Browser login opens Tailscale in a web sheet and you sign in "
-                        + "there. An auth key (tskey-…) from your tailnet admin "
-                        + "console skips the browser.")
-            }
-
-            Section("Status") {
-                LabeledContent("State", value: stateText)
-                if let ip = ipv4Text {
-                    LabeledContent("Tailnet IP", value: ip)
-                }
-                if let name = controller.tailnetName, !name.isEmpty {
-                    LabeledContent("Node", value: name)
-                }
-            }
-
+            tailnetSection
+            loginSection
+            statusSection
             if case .failed(let message) = controller.state {
                 Section {
                     Text(message)
@@ -84,15 +47,7 @@ struct TailnetSettingsView: View {
                     Text("Error")
                 }
             }
-
-            Section {
-                Button(role: .destructive) {
-                    controller.stop()
-                } label: {
-                    Label("Disconnect", systemImage: "xmark.circle")
-                }
-                .disabled(!controller.isActive)
-            }
+            disconnectSection
         }
         .navigationTitle("Tailnet")
         .navigationBarTitleDisplayMode(.inline)
@@ -127,6 +82,63 @@ struct TailnetSettingsView: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
             }
+        }
+    }
+
+    private var tailnetSection: some View {
+        Section {
+            Toggle("Tailnet Access", isOn: tailnetBinding)
+        } header: {
+            Text("Embedded Tailscale")
+        } footer: {
+            Text(
+                "Runs a userspace Tailscale node — no system VPN is created, "
+                    + "so it coexists with your existing VPN/proxy app. SSH "
+                    + "connections to tailnet hosts ride this node.")
+        }
+    }
+
+    private var loginSection: some View {
+        Section {
+            Button {
+                requestLogin()
+            } label: {
+                Label("Log In with Browser", systemImage: "globe")
+            }
+
+            Button {
+                showAuthKeyPrompt = true
+            } label: {
+                Label("Use Auth Key…", systemImage: "key")
+            }
+        } footer: {
+            Text(
+                "Browser login opens Tailscale in a web sheet and you sign in "
+                    + "there. An auth key (tskey-…) from your tailnet admin "
+                    + "console skips the browser.")
+        }
+    }
+
+    private var statusSection: some View {
+        Section("Status") {
+            LabeledContent("State", value: stateText)
+            if let ip = ipv4Text {
+                LabeledContent("Tailnet IP", value: ip)
+            }
+            if let name = controller.tailnetName, !name.isEmpty {
+                LabeledContent("Node", value: name)
+            }
+        }
+    }
+
+    private var disconnectSection: some View {
+        Section {
+            Button(role: .destructive) {
+                controller.stop()
+            } label: {
+                Label("Disconnect", systemImage: "xmark.circle")
+            }
+            .disabled(!controller.isActive)
         }
     }
 

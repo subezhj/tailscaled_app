@@ -116,7 +116,7 @@ struct NotificationKeyStoreTests {
 struct SharedKeychainNotificationKeyStoreTests {
     @Test func roundTripsThroughTheSharedAccessGroup() throws {
         let secrets = KeychainSecretStore(
-            service: "dev.bybee.heeler.tests.notifications",
+            service: "dev.bybee.heeler.sube.tests.notifications",
             accessGroup: NotificationKeyStore.sharedAccessGroup)
         let store = NotificationKeyStore(secrets: secrets)
         let record = NotificationKeyRecord(

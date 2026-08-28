@@ -65,11 +65,11 @@ targets:
         # Shared with the Notification Service Extension; doubles as the
         # Keychain access group holding the Notification Keys.
         com.apple.security.application-groups:
-          - group.dev.bybee.heeler.shared
+          - group.dev.bybee.heeler.sube.shared
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        PRODUCT_BUNDLE_IDENTIFIER: dev.bybee.heeler
+        PRODUCT_BUNDLE_IDENTIFIER: dev.bybee.heeler.sube
         # Home-screen name; the App Store listing is "Heeler for herdr".
         INFOPLIST_KEY_CFBundleDisplayName: Heeler
         MARKETING_VERSION: "0.1.3"
@@ -117,7 +117,7 @@ targets:
       path: Sources/HeelerNotificationService/HeelerNotificationService.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.dev.bybee.heeler.shared
+          - group.dev.bybee.heeler.sube.shared
     info:
       path: Sources/HeelerNotificationService/Info.plist
       properties:
@@ -135,7 +135,7 @@ targets:
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).NotificationService
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.bybee.heeler.NotificationService
+        PRODUCT_BUNDLE_IDENTIFIER: dev.bybee.heeler.sube.NotificationService
         MARKETING_VERSION: "0.1.3"
         CURRENT_PROJECT_VERSION: "15"
         # Match the containing app's iPhone-only device family.
@@ -166,7 +166,7 @@ targets:
       path: Sources/HeelerWidgets/HeelerWidgets.entitlements
       properties:
         com.apple.security.application-groups:
-          - group.dev.bybee.heeler.shared
+          - group.dev.bybee.heeler.sube.shared
     info:
       path: Sources/HeelerWidgets/Info.plist
       properties:
@@ -183,7 +183,7 @@ targets:
           NSExtensionPointIdentifier: com.apple.widgetkit-extension
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: dev.bybee.heeler.Widgets
+        PRODUCT_BUNDLE_IDENTIFIER: dev.bybee.heeler.sube.Widgets
         MARKETING_VERSION: "0.1.3"
         CURRENT_PROJECT_VERSION: "15"
         # Match the containing app's iPhone-only device family.
@@ -207,7 +207,7 @@ targets:
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
-        PRODUCT_BUNDLE_IDENTIFIER: dev.bybee.heeler.tests
+        PRODUCT_BUNDLE_IDENTIFIER: dev.bybee.heeler.sube.tests
     dependencies:
       - target: Heeler
       - package: HeelerSSH

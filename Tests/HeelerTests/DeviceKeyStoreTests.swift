@@ -51,7 +51,7 @@ struct DeviceKeyStoreTests {
 // exercise it for real rather than trusting the in-memory stand-in.
 @Suite("Keychain secret store", .serialized)
 struct KeychainSecretStoreTests {
-    private let store = KeychainSecretStore(service: "dev.bybee.heeler.tests")
+    private let store = KeychainSecretStore(service: "dev.bybee.heeler.sube.tests")
 
     @Test func roundTripsAndRemoves() throws {
         let account = "test-\(UUID().uuidString)"

@@ -75,7 +75,7 @@ struct DNSServiceFunctions: Sendable {
 final class DNSServiceQuery: @unchecked Sendable {
     private let functions: DNSServiceFunctions
     private let queue = DispatchQueue(
-        label: "dev.bybee.heeler.ssh.dns-resolution",
+        label: "dev.bybee.heeler.sube.ssh.dns-resolution",
         qos: .userInitiated)
 
     private var reference: DNSServiceRef?

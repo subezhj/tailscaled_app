@@ -231,7 +231,7 @@ actor TailnetBusConsumer: MessageConsumer {
 
 /// Writes TailscaleKit logs to the unified log stream.
 final class TailnetLogger: LogSink, @unchecked Sendable {
-    private let logger = Logger(subsystem: "dev.bybee.heeler", category: "tailnet")
+    private let logger = Logger(subsystem: "dev.bybee.heeler.sube", category: "tailnet")
 
     func log(_ message: String) {
         logger.info("\(message, privacy: .public)")

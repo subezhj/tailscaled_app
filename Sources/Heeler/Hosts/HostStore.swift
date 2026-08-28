@@ -31,7 +31,7 @@ final class HostStore {
 
     init(
         defaults: UserDefaults = .standard,
-        secrets: any SecretStore = KeychainSecretStore(service: "dev.bybee.heeler.ssh")
+        secrets: any SecretStore = KeychainSecretStore(service: "dev.bybee.heeler.sube.ssh")
     ) {
         self.defaults = defaults
         self.secrets = secrets

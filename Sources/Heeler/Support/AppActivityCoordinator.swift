@@ -63,7 +63,7 @@ final class UIKitBackgroundExecutionGranter: BackgroundExecutionGranting {
         onExpiration: @escaping @MainActor @Sendable () -> Void
     ) -> BackgroundExecutionToken? {
         let identifier = UIApplication.shared.beginBackgroundTask(
-            withName: "dev.bybee.heeler.background-grace"
+            withName: "dev.bybee.heeler.sube.background-grace"
         ) {
             // UIKit calls this on the main thread but the API is not
             // annotated for it, so hop deliberately instead of asserting an

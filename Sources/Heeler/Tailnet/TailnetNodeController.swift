@@ -60,14 +60,23 @@ final class TailnetNodeController: ObservableObject {
 
     // MARK: - Lifecycle
 
-    func start() {
-        guard node == nil else { return }
+    /// Starts (or restarts) the embedded node, optionally with an auth key.
+    /// The auth key must be set before `tailscale_start`, so it can only be
+    /// supplied at creation time — an already-running unauthenticated node
+    /// must be torn down and recreated with the key.
+    func start(authKey: String? = nil) {
+        // If a node already exists, only the current auth state matters; a
+        // freshly provided key requires a restart (key is init-time only).
+        if let node, authKey != nil {
+            stopNodeForRestart(node)
+        }
+        guard self.node == nil else { return }
         state = .starting
         do {
             let config = Configuration(
                 hostName: "heeler-ios",
                 path: stateDirectory,
-                authKey: nil, // web auth (user logs in via browser)
+                authKey: authKey, // web auth if nil
                 controlURL: kDefaultControlURL,
                 ephemeral: false)
             let node = try TailscaleNode(config: config, logger: logger)
@@ -77,6 +86,24 @@ final class TailnetNodeController: ObservableObject {
             }
         } catch {
             state = .failed(error.localizedDescription)
+        }
+    }
+
+    /// Tears down a running node so a new one can be created with an auth key.
+    /// Clears `node` synchronously (the close happens in the background) so a
+    /// subsequent `start(authKey:)` can create a fresh node immediately.
+    private func stopNodeForRestart(_ node: TailscaleNode) {
+        SocketConnector.socks5Proxy = nil
+        isSocksProxyActive = false
+        loopback = nil
+        pendingLoginURL = nil
+        let cancelProcessor = processor
+        processor = nil
+        localAPI = nil
+        self.node = nil
+        Task {
+            cancelProcessor?.cancel()
+            try? await node.close()
         }
     }
 
@@ -165,13 +192,23 @@ final class TailnetNodeController: ObservableObject {
 
     /// Starts interactive login. `startLoginInteractive()` makes the node
     /// emit `BrowseToURL` on the IPN bus; the view presents that URL.
+    /// If the node is still wiring up (localAPI not yet ready), waits a
+    /// moment and retries.
     func requestLogin() {
-        guard let localAPI else { return }
-        Task {
-            do {
-                try await localAPI.startLoginInteractive()
-            } catch {
-                // fall through; the bus may still surface a URL
+        Task { [weak self] in
+            // Wait up to ~5s for the localAPI client to come up after start().
+            for _ in 0..<25 {
+                if Task.isCancelled { return }
+                if let localAPI = self?.localAPI {
+                    do {
+                        try await localAPI.startLoginInteractive()
+                        return
+                    } catch {
+                        // fall through; the bus may still surface a URL
+                        return
+                    }
+                }
+                try? await Task.sleep(for: .milliseconds(200))
             }
         }
     }

@@ -28,6 +28,8 @@ final class AuthPresentationContext: NSObject, ASWebAuthenticationPresentationCo
 struct TailnetSettingsView: View {
     @ObservedObject var controller: TailnetNodeController
     @State private var authSession: ASWebAuthenticationSession?
+    @State private var showAuthKeyPrompt = false
+    @State private var authKeyInput = ""
     private let presentationContext = AuthPresentationContext()
     @Environment(\.dismiss) private var dismiss
 
@@ -44,6 +46,25 @@ struct TailnetSettingsView: View {
                         + "connections to tailnet hosts ride this node.")
             }
 
+            Section("Login") {
+                Button {
+                    requestLogin()
+                } label: {
+                    Label("Log In with Browser", systemImage: "globe")
+                }
+
+                Button {
+                    showAuthKeyPrompt = true
+                } label: {
+                    Label("Use Auth Key…", systemImage: "key")
+                }
+            } footer: {
+                Text(
+                    "Browser login opens Tailscale in a web sheet and you sign in "
+                        + "there. An auth key (tskey-…) from your tailnet admin "
+                        + "console skips the browser.")
+            }
+
             Section("Status") {
                 LabeledContent("State", value: stateText)
                 if let ip = ipv4Text {
@@ -51,11 +72,6 @@ struct TailnetSettingsView: View {
                 }
                 if let name = controller.tailnetName, !name.isEmpty {
                     LabeledContent("Node", value: name)
-                }
-                if controller.pendingLoginURL != nil {
-                    Button("Log In to Tailscale") {
-                        presentLogin()
-                    }
                 }
             }
 
@@ -96,11 +112,39 @@ struct TailnetSettingsView: View {
                 presentLogin()
             }
         }
+        .alert("Use Auth Key", isPresented: $showAuthKeyPrompt) {
+            TextField("tskey-…", text: $authKeyInput)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            Button("Connect", action: submitAuthKey)
+            Button("Cancel", role: .cancel) { authKeyInput = "" }
+        } message: {
+            Text(
+                "Paste a tailscale auth key (tskey-…) from the admin console. "
+                    + "The node reconnects with this key.")
+        }
         .toolbar {
             ToolbarItem(placement: .confirmationAction) {
                 Button("Done") { dismiss() }
             }
         }
+    }
+
+    private func requestLogin() {
+        // Ask the node to surface a BrowseToURL; the bus delivers it and
+        // onAppear/onChange pop the browser sheet.
+        controller.start()
+        controller.requestLogin()
+    }
+
+    private func submitAuthKey() {
+        let key = authKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        authKeyInput = ""
+        guard !key.isEmpty else { return }
+        // The auth key must be set before the node starts, so restart the
+        // node with the key.
+        controller.stop()
+        controller.start(authKey: key)
     }
 
     private func presentLogin() {

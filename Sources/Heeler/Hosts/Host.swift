@@ -31,13 +31,16 @@ struct Host: Identifiable, Codable, Hashable, Sendable {
     /// Account on the Jump Host. Blank reuses `username`, which is the common
     /// case only when both machines share an account name.
     var jumpUsername: String
+    /// When true the Host is hidden from the console and cannot be connected.
+    /// The record (and its saved password) is kept so it can be re-enabled.
+    var isDisabled: Bool
 
     /// `socatPath` is deliberately absent: Hosts serialized before ADR 0011
     /// still carry it on disk, and leaving it out of the keys both ignores it
     /// on decode and drops it on the Host's next save.
     private enum CodingKeys: String, CodingKey {
         case id, name, address, port, username, authMethod, sessionName
-        case jumpAddress, jumpPort, jumpUsername
+        case jumpAddress, jumpPort, jumpUsername, isDisabled
     }
 
     /// Whether this Host is reached through a Jump Host.
@@ -61,7 +64,8 @@ struct Host: Identifiable, Codable, Hashable, Sendable {
         sessionName: String = "",
         jumpAddress: String = "",
         jumpPort: Int = 22,
-        jumpUsername: String = ""
+        jumpUsername: String = "",
+        isDisabled: Bool = false
     ) {
         self.id = id
         self.name = name
@@ -73,6 +77,7 @@ struct Host: Identifiable, Codable, Hashable, Sendable {
         self.jumpAddress = jumpAddress
         self.jumpPort = jumpPort
         self.jumpUsername = jumpUsername
+        self.isDisabled = isDisabled
     }
 
     init(from decoder: any Decoder) throws {
@@ -89,6 +94,8 @@ struct Host: Identifiable, Codable, Hashable, Sendable {
         jumpAddress = try container.decodeIfPresent(String.self, forKey: .jumpAddress) ?? ""
         jumpPort = try container.decodeIfPresent(Int.self, forKey: .jumpPort) ?? 22
         jumpUsername = try container.decodeIfPresent(String.self, forKey: .jumpUsername) ?? ""
+        // Absent in Hosts saved before disable support: enabled by default.
+        isDisabled = try container.decodeIfPresent(Bool.self, forKey: .isDisabled) ?? false
 
         let trimmedSessionName = sessionName.trimmingCharacters(in: .whitespaces)
         guard trimmedSessionName.isEmpty || HerdrSessionName.isValid(trimmedSessionName) else {

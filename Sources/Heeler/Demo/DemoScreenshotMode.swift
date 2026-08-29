@@ -74,7 +74,8 @@
                 bannerStore: bannerStore,
                 liveActivities: liveActivities,
                 activity: activity,
-                tailnet: TailnetNodeController()
+                tailnet: TailnetNodeController(),
+                audioKeeper: AudioSessionKeeper()
             )
             .preferredColorScheme(appearance.preferredColorScheme)
             .task {

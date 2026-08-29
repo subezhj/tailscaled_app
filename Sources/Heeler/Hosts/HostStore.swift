@@ -101,6 +101,23 @@ final class HostStore {
         try persist()
     }
 
+    /// Toggles whether a Host is disabled (hidden + not connectable). The
+    /// record and its saved password are preserved so the Host can be
+    /// re-enabled later.
+    func setDisabled(_ id: Host.ID, _ disabled: Bool) throws {
+        try ensureCatalogIsWritable()
+        guard let index = hosts.firstIndex(where: { $0.id == id }) else {
+            throw HostStoreError.unknownHost
+        }
+        hosts[index].isDisabled = disabled
+        try persist()
+    }
+
+    /// Hosts that are not disabled; what the console surfaces.
+    var enabledHosts: [Host] {
+        hosts.filter { !$0.isDisabled }
+    }
+
     /// The stored password for a Host, or nil when none was saved.
     func password(for host: Host) throws -> String? {
         try secrets.read(account: Self.passwordAccount(for: host.id))

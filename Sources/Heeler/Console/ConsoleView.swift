@@ -24,6 +24,9 @@ struct ConsoleView: View {
     /// Embedded userspace Tailscale node (no system VPN); SSH to tailnet hosts
     /// rides its loopback SOCKS5 proxy when active.
     let tailnet: TailnetNodeController
+    /// Silent-audio background keepalive; keeps SSH sockets warm when
+    /// backgrounded so returning to the app is instant instead of reconnecting.
+    let audioKeeper: AudioSessionKeeper
     @State private var hostSheet: HostSheet?
     @State private var isStartingAgent = false
     @State private var isShowingSettings = false
@@ -60,8 +63,25 @@ struct ConsoleView: View {
                 .navigationTitle("Agents")
                 .navigationSplitViewColumnWidth(min: 320, ideal: 380)
                 .toolbar {
+                    // Background audio keepalive quick toggle (also in Settings).
+                    ToolbarItem(placement: .topBarLeading) {
+                        Button {
+                            audioKeeper.isEnabled.toggle()
+                        } label: {
+                            Image(
+                                systemName: audioKeeper.isActive
+                                    ? "waveform.circle.fill"
+                                    : "waveform.circle")
+                        }
+                        .accessibilityLabel(
+                            audioKeeper.isActive
+                                ? "Background keepalive on"
+                                : "Background keepalive off")
+                        .accessibilityValue(
+                            audioKeeper.isActive ? "On" : "Off")
+                    }
                     // A filter is meaningless with a single Host.
-                    if hosts.hosts.count > 1 {
+                    if hosts.enabledHosts.count > 1 {
                         ToolbarItem(placement: .primaryAction) {
                             Menu(
                                 "Filter by Host",
@@ -71,14 +91,14 @@ struct ConsoleView: View {
                             ) {
                                 Picker("Host", selection: $hostFilter) {
                                     Text("All Hosts").tag(Host.ID?.none)
-                                    ForEach(hosts.hosts) { host in
+                                    ForEach(hosts.enabledHosts) { host in
                                         Text(host.displayName).tag(Host.ID?.some(host.id))
                                     }
                                 }
                             }
                         }
                     }
-                    if !hosts.hosts.isEmpty {
+                    if !hosts.enabledHosts.isEmpty {
                         ToolbarItem(placement: .primaryAction) {
                             Menu {
                                 Picker("Presentation", selection: presentationModeBinding) {
@@ -107,7 +127,7 @@ struct ConsoleView: View {
                             isShowingSettings = true
                         }
                     }
-                    if !hosts.hosts.isEmpty {
+                    if !hosts.enabledHosts.isEmpty {
                         ToolbarItem(placement: .primaryAction) {
                             Button("New Agent", systemImage: "plus") {
                                 isStartingAgent = true
@@ -128,7 +148,7 @@ struct ConsoleView: View {
                 }
                 .sheet(isPresented: $isStartingAgent) {
                     // StartAgentView brings its own NavigationStack.
-                    StartAgentView(hosts: hosts.hosts, console: console) { id in
+                    StartAgentView(hosts: hosts.enabledHosts, console: console) { id in
                         // A fresh launch lands in its own terminal, exactly
                         // as tapping the new row would.
                         notificationRouter.path = [id]
@@ -142,7 +162,8 @@ struct ConsoleView: View {
                         notificationPreferences: notificationPreferences,
                         relaySettings: relaySettings,
                         liveActivities: liveActivities,
-                        tailnet: tailnet)
+                        tailnet: tailnet,
+                        audioKeeper: audioKeeper)
                 }
         } detail: {
             detail
@@ -176,7 +197,7 @@ struct ConsoleView: View {
         }
         // A filter pointing at a removed Host would silently hide every
         // Agent; fall back to All Hosts instead.
-        .onChange(of: hosts.hosts) { _, hosts in
+        .onChange(of: hosts.enabledHosts) { _, hosts in
             if let hostFilter, !hosts.contains(where: { $0.id == hostFilter }) {
                 self.hostFilter = nil
             }
@@ -219,7 +240,7 @@ struct ConsoleView: View {
                     agent: agent,
                     console: console,
                     terminal: terminal,
-                    hosts: hosts.hosts,
+                    hosts: hosts.enabledHosts,
                     activity: activity,
                     keyboardHandoff: keyboardHandoff,
                     keyboardInset: keyboardInset,
@@ -401,7 +422,7 @@ struct ConsoleView: View {
 
     private var agentsSurface: ConsoleAgentsSurface {
         ConsoleAgentsSurface(
-            hostCount: hosts.hosts.count,
+            hostCount: hosts.enabledHosts.count,
             filteredHostName: hostFilter == nil ? nil : filteredHostName,
             filteredAgentCount: filteredAgents.count,
             visibleIssueCount: visibleHostIssues.count,
@@ -411,7 +432,7 @@ struct ConsoleView: View {
 
     private var hostSections: [ConsoleHostSection] {
         listPresentation.sections(
-            hosts: hosts.hosts,
+            hosts: hosts.enabledHosts,
             console: console,
             filteredHostID: hostFilter)
     }
@@ -445,7 +466,7 @@ struct ConsoleView: View {
     }
 
     private var filteredHostName: String {
-        hosts.hosts.first(where: { $0.id == hostFilter })?.displayName ?? "this Host"
+        hosts.enabledHosts.first(where: { $0.id == hostFilter })?.displayName ?? "this Host"
     }
 
     private struct HostSheet: Identifiable {
@@ -456,7 +477,7 @@ struct ConsoleView: View {
     /// One actionable status per Host. A disconnected session takes priority;
     /// otherwise a connected Host can still have a failing snapshot RPC.
     private var hostIssues: [ConsoleHostStatusPresentation] {
-        hosts.hosts.compactMap { host in
+        hosts.enabledHosts.compactMap { host in
             ConsoleHostStatusPresentation(
                 host: host,
                 status: console.hostStatuses[host.id],
@@ -664,7 +685,7 @@ struct MissingAgentPresentation: Equatable {
         self.init(
             agentID: agentID,
             hostStatuses: console.hostStatuses,
-            hosts: hosts.hosts,
+            hosts: hosts.enabledHosts,
             hostsAwaitingSnapshot: console.hostsAwaitingSnapshot,
             hostStandingFailures: console.hostStandingFailures)
     }

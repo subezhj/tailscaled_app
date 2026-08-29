@@ -78,6 +78,9 @@ struct HostListView: View {
     @State private var isScanningToPair = false
     @State private var manualFallbackRequested = false
     @State private var path: [Host.ID] = []
+    /// When true the list also shows disabled Hosts (dimmed); off (default)
+    /// hides them entirely.
+    @State private var showsDisabled = false
 
     init(
         store: HostStore,
@@ -123,15 +126,47 @@ struct HostListView: View {
                         .buttonStyle(.borderedProminent)
                         Button("Add Manually") { isAddingHost = true }
                     }
+                } else if visibleHosts.isEmpty {
+                    ContentUnavailableView {
+                        Label("No Hosts", systemImage: "server.rack")
+                    } description: {
+                        Text(
+                            showsDisabled
+                                ? "All Hosts are disabled. Swipe right to re-enable, or use Show Disabled."
+                                : "Add a machine that runs herdr to get started.")
+                    } actions: {
+                        // Scan to Pair is the primary add-Host action; the
+                        // manual form is the fallback (ADR 0007).
+                        Button("Scan to Pair", systemImage: "qrcode.viewfinder") {
+                            isScanningToPair = true
+                        }
+                        .buttonStyle(.borderedProminent)
+                        Button("Add Manually") { isAddingHost = true }
+                    }
                 } else {
                     List {
-                        ForEach(store.hosts) { host in
+                        ForEach(visibleHosts) { host in
                             NavigationLink(value: host.id) {
                                 HostRow(
                                     host: host,
                                     connectionStatus: connectionStatuses[host.id],
                                     standingFailure: standingFailures[host.id],
                                     latency: latencies[host.id])
+                            }
+                            .disabled(host.isDisabled)
+                            .opacity(host.isDisabled ? 0.4 : 1)
+                            .swipeActions(edge: .trailing) {
+                                if host.isDisabled {
+                                    Button("Enable") {
+                                        try? store.setDisabled(host.id, false)
+                                    }
+                                    .tint(.green)
+                                } else {
+                                    Button("Disable", systemImage: "eye.slash") {
+                                        try? store.setDisabled(host.id, true)
+                                    }
+                                    .tint(.orange)
+                                }
                             }
                         }
                         .onDelete(perform: removeHosts)
@@ -149,6 +184,18 @@ struct HostListView: View {
                 ToolbarItem(placement: .primaryAction) {
                     Button("Add Host", systemImage: "plus") { isAddingHost = true }
                         .disabled(store.catalogLoadError != nil)
+                }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button {
+                        showsDisabled.toggle()
+                    } label: {
+                        Image(
+                            systemName: showsDisabled
+                                ? "eye.fill"
+                                : "eye.slash")
+                    }
+                    .accessibilityLabel(
+                        showsDisabled ? "Hide disabled Hosts" : "Show disabled Hosts")
                 }
             }
             .navigationDestination(for: Host.ID.self) { id in
@@ -240,8 +287,14 @@ struct HostListView: View {
             set: { if !$0 { removal.cancelRemoval() } })
     }
 
+    /// Hosts shown in the list: all when "Show Disabled" is on, otherwise
+    /// only enabled ones.
+    private var visibleHosts: [Host] {
+        showsDisabled ? store.hosts : store.enabledHosts
+    }
+
     private func removeHosts(at offsets: IndexSet) {
-        removal.requestRemoval(offsets.map { store.hosts[$0].id })
+        removal.requestRemoval(offsets.map { visibleHosts[$0].id })
     }
 
     private func retryAction(

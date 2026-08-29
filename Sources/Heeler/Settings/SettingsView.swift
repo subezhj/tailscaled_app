@@ -40,6 +40,8 @@ struct SettingsView: View {
     /// Embedded userspace Tailscale node; SSH to tailnet hosts rides its
     /// loopback SOCKS5 proxy when active.
     let tailnet: TailnetNodeController
+    /// Silent-audio background keepalive switch.
+    let audioKeeper: AudioSessionKeeper
     @Environment(\.dismiss) private var dismiss
 
     static let repositoryURL = URL(string: "https://github.com/ZingerLittleBee/Heeler")
@@ -104,6 +106,20 @@ struct SettingsView: View {
                     } label: {
                         Label("Tailnet", systemImage: "network")
                     }
+                    Toggle(
+                        "Background Keepalive",
+                        systemImage: "waveform.circle",
+                        isOn: keepaliveBinding)
+                } header: {
+                    Text("Connections")
+                } footer: {
+                    Text(
+                        "Keeps the app alive in the background with silent audio so "
+                            + "SSH sockets stay warm — returning to the app is instant "
+                            + "instead of reconnecting. Costs extra battery.")
+                }
+
+                Section {
                     NavigationLink {
                         NotificationSettingsView(
                             pushRegistration: pushRegistration,
@@ -168,6 +184,14 @@ struct SettingsView: View {
                 }
             }
         }
+    }
+
+    /// Background keepalive toggle, bound through the keeper so turning it on
+    /// starts the silent loop immediately and off stops it.
+    private var keepaliveBinding: Binding<Bool> {
+        Binding(
+            get: { audioKeeper.isEnabled },
+            set: { audioKeeper.isEnabled = $0 })
     }
 
     /// The app's own light/dark override. A menu picker, not a pushed screen:

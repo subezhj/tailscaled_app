@@ -88,6 +88,11 @@ targets:
         INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
         # ActivityKit starts Live Activities from the app; HeelerWidgets renders them.
         INFOPLIST_KEY_NSSupportsLiveActivities: YES
+        # Background audio (silent loop) keepalive — opt-in, off by default.
+        # Declared so a user who enables the keepalive actually gets the
+        # background execution it needs to keep SSH sockets warm.
+        INFOPLIST_KEY_UIBackgroundModes:
+          - audio
     dependencies:
       - package: HeelerSSH
       - package: TailscaleKit

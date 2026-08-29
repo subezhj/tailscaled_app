@@ -19,6 +19,7 @@ struct ContentView: View {
     @State private var snippets = SnippetStore()
     @State private var appearance = AppAppearanceSettings()
     @State private var tailnet = TailnetNodeController()
+    @State private var audioKeeper = AudioSessionKeeper()
     @State private var relaySettings: NotificationRelaySettings
     @State private var bannerStore: AgentNotificationBannerStore
     @State private var liveActivities: HostLiveActivityCoordinator
@@ -105,7 +106,8 @@ struct ContentView: View {
             bannerStore: bannerStore,
             liveActivities: liveActivities,
             activity: activity,
-            tailnet: tailnet
+            tailnet: tailnet,
+            audioKeeper: audioKeeper
         )
         // The one place the app's light/dark override is applied: it lands on
         // the window, so sheets, pushed screens, and the UIKit terminal
@@ -122,6 +124,11 @@ struct ContentView: View {
         // stays up across Host connections; Settings › Tailnet shows status.
         .task {
             tailnet.start()
+        }
+        // Resume the silent-audio keepalive on launch if the user enabled it
+        // (restarts after the system dropped the session while backgrounded).
+        .task {
+            audioKeeper.start()
         }
         .onChange(of: hostStore.hosts) {
             console.setHosts(hostStore.hosts)
@@ -168,6 +175,9 @@ struct ContentView: View {
             switch scenePhase {
             case .active:
                 activity.didBecomeActive()
+                // Resume the silent-audio keepalive if the system dropped the
+                // audio session while we were away.
+                audioKeeper.didBecomeActive()
                 // Re-probes notification permission on every return, grace
                 // period or not: the user may have flipped it in the
                 // Settings app while we were backgrounded.

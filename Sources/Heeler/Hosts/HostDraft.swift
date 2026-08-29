@@ -18,6 +18,9 @@ struct HostDraft: Equatable, Sendable {
     var jumpPort = "22"
     /// Blank reuses the Host's own username.
     var jumpUsername = ""
+    /// Preserved through editing so a disabled Host stays disabled after
+    /// its other fields are changed.
+    var isDisabled = false
 
     init() {}
 
@@ -32,6 +35,7 @@ struct HostDraft: Equatable, Sendable {
         jumpAddress = host.jumpAddress
         jumpPort = String(host.jumpPort)
         jumpUsername = host.jumpUsername
+        isDisabled = host.isDisabled
     }
 
     var portNumber: Int? {
@@ -84,7 +88,8 @@ struct HostDraft: Equatable, Sendable {
             sessionName: sessionName.trimmingCharacters(in: .whitespaces),
             jumpAddress: jumpAddress.trimmingCharacters(in: .whitespaces),
             jumpPort: jumpPortNumber ?? 22,
-            jumpUsername: jumpUsername.trimmingCharacters(in: .whitespaces))
+            jumpUsername: jumpUsername.trimmingCharacters(in: .whitespaces),
+            isDisabled: isDisabled)
     }
 
     /// What to hand `HostStore.add/update` as the password argument: a new

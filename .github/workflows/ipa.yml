@@ -86,6 +86,16 @@ jobs:
       - name: Generate Xcode project
         run: xcodegen generate
 
+      # Read the version from project.yml so artifact names carry it.
+      - name: Read version
+        id: version
+        run: |
+          MARKETING=$(awk -F'"' '/MARKETING_VERSION/ {print $2; exit}' project.yml)
+          BUILD=$(awk -F'"' '/CURRENT_PROJECT_VERSION/ {print $2; exit}' project.yml)
+          echo "marketing=${MARKETING:-0.0.0}" >> "$GITHUB_OUTPUT"
+          echo "build=${BUILD:-0}" >> "$GITHUB_OUTPUT"
+          echo "version=${MARKETING:-0.0.0} (${BUILD:-0})" >> "$GITHUB_OUTPUT"
+
       # ---- Archive ----
       - name: Archive (unsigned)
         if: github.event.inputs.signing != 'development'
@@ -167,20 +177,29 @@ jobs:
             -allowProvisioningUpdates
           mv build/ipa/Heeler.ipa build/Heeler-signed.ipa 2>/dev/null || true
 
-      - name: Upload IPA artifact
+      - name: Package zip (IPA only, no source)
+        run: |
+          mkdir -p build/dist
+          VERSION="${{ steps.version.outputs.version }}"
+          SIGN="${{ github.event.inputs.signing || 'unsigned' }}"
+          # Always name the unsigned IPA for the default path.
+          if [ -f build/Heeler-unsigned.ipa ]; then
+            cp build/Heeler-unsigned.ipa "build/dist/Heeler-${VERSION}-unsigned.ipa"
+          fi
+          if [ -f build/Heeler-signed.ipa ]; then
+            cp build/Heeler-signed.ipa "build/dist/Heeler-${VERSION}-signed.ipa"
+          fi
+          cd build/dist
+          zip -qry "../Heeler-${VERSION}-${SIGN}.zip" .
+          cd ../..
+          ls -la build/dist build/Heeler-*.zip
+
+      - name: Upload IPA zip artifact
         uses: actions/upload-artifact@v4
         with:
           name: Heeler-IPA
           path: |
-            build/Heeler-unsigned.ipa
-            build/Heeler-signed.ipa
+            build/Heeler-*.zip
+            build/dist/*.ipa
           if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload .app (for the unsigned path)
-        if: github.event.inputs.signing != 'development'
-        uses: actions/upload-artifact@v4
-        with:
-          name: Heeler-app-unsigned
-          path: build/Heeler.xcarchive/Products/Applications/Heeler.app
           retention-days: 30

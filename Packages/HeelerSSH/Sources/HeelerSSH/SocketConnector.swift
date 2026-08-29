@@ -18,10 +18,12 @@ public enum SocketConnector {
         to endpoint: SSHEndpoint,
         until deadline: ContinuousClock.Instant
     ) async throws -> Int32 {
-        // If a userspace Tailscale node is running, route tailnet-ward traffic
-        // through its local SOCKS5 proxy. DNS (including MagicDNS names)
-        // resolves proxy-side inside the node.
-        if let proxy = socks5Proxy {
+        // Split tunnel: only tailnet destinations (100.64.0.0/10, *.ts.net,
+        // fd7a:/48) ride the embedded node's SOCKS5 proxy — the tsnet proxy
+        // cannot dial non-tailnet hosts, so routing everything through it
+        // breaks LAN/public destinations with connectionFailed. Everything
+        // else dials directly.
+        if let proxy = socks5Proxy, TailnetTarget.isTailnet(endpoint.host) {
             return try await SOCKS5Connector.connect(
                 via: proxy,
                 to: endpoint.host,

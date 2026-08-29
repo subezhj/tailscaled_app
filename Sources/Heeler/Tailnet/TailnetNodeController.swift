@@ -111,15 +111,15 @@ final class TailnetNodeController: ObservableObject {
         }
     }
 
-    /// After the node is created: start the IPN bus watcher, then get the
-    /// loopback SOCKS5 address so SSH can ride the tailnet.
+    /// After the node is created: start the IPN bus watcher, then keep the
+    /// loopback SOCKS5 config ready. The proxy is injected into the SSH layer
+    /// only once the node is verified (Running) — before that the tailnet
+    /// isn't reachable, and routing connections through a not-yet-up node
+    /// would make every tailnet SSH attempt fail with connectionFailed.
     private func wireUp(node: TailscaleNode) async {
         do {
-            // The loopback SOCKS5 proxy is available as soon as the node is
-            // started (before login), so wire the SSH layer immediately.
             let loopback = try await node.loopback()
             self.loopback = loopback
-            activateProxy(loopback)
 
             let localAPI = LocalAPIClient(localNode: node, logger: logger)
             self.localAPI = localAPI
@@ -144,6 +144,9 @@ final class TailnetNodeController: ObservableObject {
             case .NeedsLogin:
                 self.state = .needsLogin
                 isVerified = false
+                // Node is not usable yet — don't route SSH through it.
+                SocketConnector.socks5Proxy = nil
+                isSocksProxyActive = false
                 if let urlString = notify.BrowseToURL, let url = URL(string: urlString) {
                     pendingLoginURL = url
                 }
@@ -151,6 +154,11 @@ final class TailnetNodeController: ObservableObject {
                 isVerified = true
                 isSocksProxyActive = true
                 pendingLoginURL = nil
+                // Node authenticated: now route tailnet destinations through
+                // its loopback SOCKS5 proxy.
+                if let loopback {
+                    activateProxy(loopback)
+                }
                 refreshRunningState()
             case .Starting, .NoState, .Stopped:
                 break

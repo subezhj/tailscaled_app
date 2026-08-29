@@ -472,33 +472,43 @@ struct AgentTerminalView: View {
             // replacement, so the new surface lands at its final size.
             .animation(nil, value: attach.terminalID)
         .overlay { statusOverlay }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            attachmentStatus
+        // The composer floats over the terminal instead of insetting it. The
+        // system keyboard never shrinks the terminal's grid: a keyboard is an
+        // overlay that covers the bottom rows, not a window resize. Keeping
+        // the grid's rows constant means no PTY resize rides the keyboard
+        // show/hide — which herdr would broadcast to every client attached
+        // to the same pane, including a desktop herdr TUI on the same host
+        // (#127: the PC side shrank to the phone's rows on every keystroke).
+        // The composer itself is raised by the keyboard's own inset below,
+        // so it always sits on the keyboard's top edge. Placed before the
+        // staging bar so the bar (z-above) stays visible over the composer.
+        .overlay(alignment: .bottom) {
+            // The staging bar (upload/paste status) rides above the composer;
+            // both rise together with the keyboard so the bar's Cancel/Retry
+            // actions stay reachable while typing.
+            VStack(spacing: 0) {
+                attachmentStatus
+                AgentComposerView(
+                    store: composer,
+                    status: agent.agent.status,
+                    hostTelemetry: hostTelemetry,
+                    chromeColorScheme: terminal.themes.selection(for: colorScheme)
+                        .chromeColorScheme(for: colorScheme),
+                    switcher: agentSwitcher,
+                    keyboardHandoff: keyboardHandoff,
+                    keyboardHeight: composerKeyboardLayout.availableToolsHeight,
+                    actions: composerActions,
+                    skills: skills,
+                    keyboardPresentation: $composerKeyboardPresentation,
+                    prepareKeyboardPresentation: prepareComposerKeyboardPresentation)
+            }
+            .offset(
+                y: composerKeyboardLayout.presentedContentInset > 0
+                    ? -composerKeyboardLayout.presentedContentInset : 0)
+            .animation(
+                .easeOut(duration: 0.25),
+                value: composerKeyboardLayout.presentedContentInset)
         }
-        // Below the keyboard's own inset, so the strip rides above the
-        // keyboard while it is up and rests on the screen's edge once it is
-        // down. It outlives the keyboard on purpose: an Agent is worth
-        // switching to whether or not the user is typing.
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            AgentComposerView(
-                store: composer,
-                status: agent.agent.status,
-                hostTelemetry: hostTelemetry,
-                chromeColorScheme: terminal.themes.selection(for: colorScheme)
-                    .chromeColorScheme(for: colorScheme),
-                switcher: agentSwitcher,
-                keyboardHandoff: keyboardHandoff,
-                keyboardHeight: composerKeyboardLayout.availableToolsHeight,
-                actions: composerActions,
-                skills: skills,
-                keyboardPresentation: $composerKeyboardPresentation,
-                prepareKeyboardPresentation: prepareComposerKeyboardPresentation)
-        }
-        // Not SwiftUI's keyboard avoidance: it retracts in two stages and the
-        // terminal would resize twice per dismissal. See TerminalKeyboardInset.
-        .modifier(
-            AgentTerminalKeyboardInsetModifier(
-                height: composerKeyboardLayout.contentInset))
         // This dock is always present at the system keyboard's last complete
         // height. In iOS mode it is transparent behind the system keyboard;
         // in Tools mode it is already in place when UIKit removes its native
@@ -812,14 +822,5 @@ private struct AttachmentStatusBar<Actions: View>: View {
         .overlay(alignment: .top) { Divider() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityLabel)
-    }
-}
-
-private struct AgentTerminalKeyboardInsetModifier: ViewModifier {
-    let height: CGFloat
-
-    func body(content: Content) -> some View {
-        content
-            .padding(.bottom, height)
     }
 }

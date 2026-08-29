@@ -16,6 +16,13 @@ struct AgentComposerKeyboardLayout: Equatable {
     let contentInset: CGFloat
     let availableToolsHeight: CGFloat
 
+    /// How far the composer overlay must rise over the keyboard/tools dock.
+    /// Identical to `contentInset` today (the composer used to sit in a
+    /// safe-area inset driven by the same value); it exists so the floating
+    /// composer's caller can read why it is raising the bar without coupling
+    /// to the old inset's history.
+    var presentedContentInset: CGFloat { contentInset }
+
     init(
         currentHeight: CGFloat,
         lastPresentedHeight: CGFloat,

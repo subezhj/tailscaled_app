@@ -132,8 +132,14 @@ final class ConsoleStore {
         await enqueueLifecycleTransition { [self] in
             isActive = true
             let projections = Array(self.projections.values)
-            for projection in projections {
-                await projection.resume()
+            // All at once: each Host's connection is independent, and a
+            // Host that times out must not hold up the others behind it.
+            // With multiple Hosts (LAN + tailnet), serial resume made a
+            // slow/unreachable Host delay every other connection.
+            await withTaskGroup(of: Void.self) { group in
+                for projection in projections {
+                    group.addTask { await projection.resume() }
+                }
             }
             guard revalidating else { return }
             // Every Host, not only one the user has navigated to: recovery

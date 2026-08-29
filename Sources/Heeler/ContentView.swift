@@ -134,6 +134,15 @@ struct ContentView: View {
             console.setHosts(hostStore.hosts)
             notificationPreferences.setHosts(hostStore.hosts)
         }
+        // When the tailnet node reaches Running (proxy injected), re-activate
+        // the console so tailnet Hosts that failed a cold-start attempt
+        // (because the proxy wasn't ready yet) connect automatically instead
+        // of waiting for a manual reconnect.
+        .onChange(of: tailnet.isVerified, initial: false) { _, verified in
+            if verified {
+                Task { await console.reactivate() }
+            }
+        }
         // Feeds the Console's Agent list to the router — so a notification
         // tap that arrived before the Hosts synced (killed-state launch)
         // routes the moment its pane appears — and to the banner store,

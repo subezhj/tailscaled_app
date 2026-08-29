@@ -14,6 +14,40 @@ public enum SocketConnector {
     }
     private static nonisolated(unsafe) var _socks5Proxy: SOCKS5Connector.ProxyEndpoint?
 
+    /// Diagnostic override: when true, even tailnet destinations are dialed
+    /// directly (bypassing the proxy). Lets the user prove whether a failure
+    /// is the proxy path or the target host.
+    public static var forceDirect: Bool {
+        get { _forceDirect }
+        set { _forceDirect = newValue }
+    }
+    private static nonisolated(unsafe) var _forceDirect = false
+
+    /// Diagnostic record of the most recent connection attempt: which host,
+    /// whether it rode the tailnet proxy, and whether it failed. Lets the UI
+    /// answer "did my SSH actually go through Tailscale?"
+    public private(set) static var lastDialReport: DialReport? {
+        get { _lastDialReport }
+        set { _lastDialReport = newValue }
+    }
+    private static nonisolated(unsafe) var _lastDialReport: DialReport?
+
+    public struct DialReport: Sendable, Equatable {
+        public let host: String
+        public let port: UInt16
+        public let viaProxy: Bool
+        public let failed: Bool
+        public let at: Date
+
+        public init(host: String, port: UInt16, viaProxy: Bool, failed: Bool, at: Date = Date()) {
+            self.host = host
+            self.port = port
+            self.viaProxy = viaProxy
+            self.failed = failed
+            self.at = at
+        }
+    }
+
     static func connect(
         to endpoint: SSHEndpoint,
         until deadline: ContinuousClock.Instant
@@ -22,15 +56,31 @@ public enum SocketConnector {
         // fd7a:/48) ride the embedded node's SOCKS5 proxy — the tsnet proxy
         // cannot dial non-tailnet hosts, so routing everything through it
         // breaks LAN/public destinations with connectionFailed. Everything
-        // else dials directly.
-        if let proxy = socks5Proxy, TailnetTarget.isTailnet(endpoint.host) {
-            return try await SOCKS5Connector.connect(
-                via: proxy,
-                to: endpoint.host,
-                targetPort: endpoint.port,
-                until: deadline)
+        // else dials directly. `forceDirect` bypasses the proxy even for
+        // tailnet targets (diagnostics).
+        let isTailnet = TailnetTarget.isTailnet(endpoint.host)
+        let viaProxy = (socks5Proxy != nil) && isTailnet && !forceDirect
+        do {
+            let descriptor: Int32
+            if viaProxy, let proxy = socks5Proxy {
+                descriptor = try await SOCKS5Connector.connect(
+                    via: proxy,
+                    to: endpoint.host,
+                    targetPort: endpoint.port,
+                    until: deadline)
+            } else {
+                descriptor = try await connectDirect(to: endpoint, until: deadline)
+            }
+            lastDialReport = DialReport(
+                host: endpoint.host, port: endpoint.port,
+                viaProxy: viaProxy, failed: false)
+            return descriptor
+        } catch {
+            lastDialReport = DialReport(
+                host: endpoint.host, port: endpoint.port,
+                viaProxy: viaProxy, failed: true)
+            throw error
         }
-        return try await connectDirect(to: endpoint, until: deadline)
     }
 
     /// Direct dial without any SOCKS5 indirection. Used both for ordinary

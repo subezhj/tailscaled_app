@@ -1,6 +1,7 @@
 import SwiftUI
 import AuthenticationServices
 import UIKit
+import HeelerSSH
 
 /// Provides the presentation anchor for `ASWebAuthenticationSession` on iOS.
 /// `ASWebAuthenticationPresentationContextProviding` is a class-bound
@@ -30,6 +31,8 @@ struct TailnetSettingsView: View {
     @State private var authSession: ASWebAuthenticationSession?
     @State private var showAuthKeyPrompt = false
     @State private var authKeyInput = ""
+    @State private var dialReport: SocketConnector.DialReport?
+    @State private var forceDirect = false
     private let presentationContext = AuthPresentationContext()
     @Environment(\.dismiss) private var dismiss
 
@@ -38,6 +41,7 @@ struct TailnetSettingsView: View {
             tailnetSection
             loginSection
             statusSection
+            routingSection
             if case .failed(let message) = controller.state {
                 Section {
                     Text(message)
@@ -61,6 +65,10 @@ struct TailnetSettingsView: View {
             if controller.pendingLoginURL != nil {
                 presentLogin()
             }
+            refreshDialReport()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            refreshDialReport()
         }
         .onChange(of: controller.pendingLoginURL) {
             if controller.pendingLoginURL != nil {
@@ -143,7 +151,46 @@ struct TailnetSettingsView: View {
             if let name = controller.tailnetName, !name.isEmpty {
                 LabeledContent("Node", value: name)
             }
+            LabeledContent(
+                "SSH Route",
+                value: controller.isSocksProxyActive ? "Tailnet via proxy" : "Direct")
         }
+    }
+
+    /// Diagnostics: whether recent SSH connections rode the tailnet proxy and
+    /// whether they succeeded. Helps answer "did my SSH go through Tailscale?"
+    private var routingSection: some View {
+        Section("SSH Routing") {
+            Toggle("Force Direct (bypass Tailscale)", isOn: forceDirectBinding)
+            if let report = dialReport {
+                LabeledContent("Last: Host", value: report.host)
+                LabeledContent(
+                    "Last: Path",
+                    value: report.viaProxy ? "Tailscale proxy" : "Direct")
+                LabeledContent(
+                    "Last: Result",
+                    value: report.failed ? "Failed" : "OK")
+            } else {
+                Text("No SSH connection yet.")
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("SSH Routing")
+        } footer: {
+            Text(
+                "Tailnet destinations (100.x, *.ts.net) ride the embedded node's "
+                    + "SOCKS5 proxy; everything else connects directly. Force Direct "
+                    + "bypasses the proxy for diagnosis.")
+        }
+    }
+
+    private var forceDirectBinding: Binding<Bool> {
+        Binding(
+            get: { forceDirect || SocketConnector.forceDirect },
+            set: { enabled in
+                forceDirect = enabled
+                SocketConnector.forceDirect = enabled
+            })
     }
 
     private var disconnectSection: some View {
@@ -162,6 +209,13 @@ struct TailnetSettingsView: View {
         // onAppear/onChange pop the browser sheet.
         controller.start()
         controller.requestLogin()
+    }
+
+    /// Pull the latest routing diagnostics from the SSH layer (set on every
+    /// connection attempt by SocketConnector).
+    private func refreshDialReport() {
+        dialReport = SocketConnector.lastDialReport
+        forceDirect = SocketConnector.forceDirect
     }
 
     private func submitAuthKey() {

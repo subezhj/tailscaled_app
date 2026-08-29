@@ -157,6 +157,11 @@ final class AgentAttachStore {
         terminal.feed
     }
 
+    /// Access to the terminal output cache for local scrollback.
+    var terminalOutputCache: TerminalOutputCache {
+        terminal.outputCache
+    }
+
     var attachLinks: [AttachLink] {
         linkIndex.links
     }

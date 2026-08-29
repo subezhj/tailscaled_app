@@ -6,6 +6,7 @@ import SwiftUI
 struct TerminalAppearanceSettingsView: View {
     let terminal: TerminalSettings
     @State private var nudge = TerminalNudgeSettings()
+    @State private var localScroll = TerminalLocalScrollSettings()
 
     var body: some View {
         Form {
@@ -23,13 +24,16 @@ struct TerminalAppearanceSettingsView: View {
 
             Section {
                 Toggle("Refresh on Return", isOn: nudgeBinding)
+                Toggle("Local Scrolling", isOn: localScrollBinding)
             } header: {
                 Text("Terminal Behavior")
             } footer: {
                 Text(
-                    "When you return to a live terminal, shrink-and-restore its "
-                        + "size so herdr's interface redraws. Off keeps the layout "
-                        + "stable but the remote TUI may not repaint its latest state.")
+                    "Refresh on Return shrinks and restores the terminal so "
+                        + "herdr redraws when you come back. Local Scrolling pages "
+                        + "ghostty's own buffer instantly instead of asking herdr "
+                        + "over the network (smooth but the scrollback may be "
+                        + "limited in herdr's full-screen UI).")
             }
 
             Section {
@@ -52,6 +56,12 @@ struct TerminalAppearanceSettingsView: View {
         Binding(
             get: { nudge.isEnabled },
             set: { nudge.isEnabled = $0 })
+    }
+
+    private var localScrollBinding: Binding<Bool> {
+        Binding(
+            get: { localScroll.isEnabled },
+            set: { localScroll.isEnabled = $0 })
     }
 
     @ViewBuilder

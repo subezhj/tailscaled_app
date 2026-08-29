@@ -1047,6 +1047,16 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
 
         let towardOlderContent = rows > 0
         let rowCount = abs(rows)
+        // Local-scroll preference: skip the remote round-trip entirely and
+        // page ghostty's own buffer. Instant, but in alternate-screen mode
+        // ghostty may have little scrollback to show. Off (default) sends
+        // remote scroll sequences to herdr so the previous TUI frames are
+        // actually available — at the cost of a network RTT per gesture.
+        if TerminalLocalScrollSettings.isEnabled() {
+            let localRows = towardOlderContent ? -rowCount : rowCount
+            _ = performBindingAction("scroll_page_lines:\(localRows)")
+            return rows
+        }
         if let sequence = modeTracker.remoteScrollSequence(
             towardOlderContent: towardOlderContent,
             columns: terminalGridSize.columns,

@@ -90,6 +90,10 @@ final class AttachTerminalStore {
     private(set) var status: Status = .waitingForSize
     /// The byte pipe the terminal view consumes.
     let feed = TerminalByteFeed()
+    /// Raw output bytes retained locally so terminal scrollback can be served
+    /// without a network round-trip to herdr (herdr's TUI is alternate-screen,
+    /// where ghostty's own scrollback is empty).
+    let outputCache = TerminalOutputCache()
     /// What the screen identifies this pipeline's surface by. Owned by the
     /// store and unique for its lifetime, so a replacement is always a
     /// different surface to SwiftUI.
@@ -280,6 +284,7 @@ final class AttachTerminalStore {
                     status = .live
                 }
                 observeOutput(bytes)
+                outputCache.append(bytes)
                 feed.write(bytes)
             }
         } catch {

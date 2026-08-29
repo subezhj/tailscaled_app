@@ -128,11 +128,20 @@ struct AgentTerminalView: View {
         return SkillsPaneStore(
             commandPrefixes: sources.map(\.commandPrefix)
         ) { [console] forceRefresh in
-            try await console.fetchSkills(
+            var skills = try await console.fetchSkills(
                 kind: kind,
                 projectRoot: projectRoot,
                 on: agent.hostID,
                 forceRefresh: forceRefresh)
+            // Merge a static catalog of common slash commands so `/`-triggered
+            // suggestions are useful even with no skill files on the Host.
+            // Project skills sort before globals at display time, so a
+            // project command of the same name still wins.
+            let builtin = BuiltinCommandCatalog.commands(for: kind.rawValue)
+            for command in builtin where !skills.contains(command) {
+                skills.append(command)
+            }
+            return skills
         }
     }
 

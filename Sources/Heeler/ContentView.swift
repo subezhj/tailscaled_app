@@ -114,7 +114,11 @@ struct ContentView: View {
         // surfaces all resolve against the chosen appearance.
         .preferredColorScheme(appearance.preferredColorScheme)
         .task {
-            console.setHosts(hostStore.hosts)
+            // Disabled Hosts are fully absent from the Console: no
+            // projection, no agents in the list or terminal switcher. The
+            // notification preferences keep the full catalog (they are
+            // per-Host settings, not connections).
+            console.setHosts(hostStore.enabledHosts)
             notificationPreferences.setHosts(hostStore.hosts)
             await console.resume()
         }
@@ -131,7 +135,7 @@ struct ContentView: View {
             audioKeeper.start()
         }
         .onChange(of: hostStore.hosts) {
-            console.setHosts(hostStore.hosts)
+            console.setHosts(hostStore.enabledHosts)
             notificationPreferences.setHosts(hostStore.hosts)
         }
         // When the tailnet node reaches Running (proxy injected), re-activate

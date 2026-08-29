@@ -156,6 +156,11 @@ struct HostListView: View {
                             .disabled(host.isDisabled)
                             .opacity(host.isDisabled ? 0.4 : 1)
                             .swipeActions(edge: .trailing) {
+                                Button(role: .destructive) {
+                                    removal.requestRemoval([host.id])
+                                } label: {
+                                    Label("Delete", systemImage: "trash")
+                                }
                                 if host.isDisabled {
                                     Button("Enable") {
                                         try? store.setDisabled(host.id, false)
@@ -168,8 +173,6 @@ struct HostListView: View {
                                     .tint(.orange)
                                 }
                             }
-                        }
-                        .onDelete(perform: removeHosts)
                     }
                 }
             }
@@ -291,10 +294,6 @@ struct HostListView: View {
     /// only enabled ones.
     private var visibleHosts: [Host] {
         showsDisabled ? store.hosts : store.enabledHosts
-    }
-
-    private func removeHosts(at offsets: IndexSet) {
-        removal.requestRemoval(offsets.map { visibleHosts[$0].id })
     }
 
     private func retryAction(

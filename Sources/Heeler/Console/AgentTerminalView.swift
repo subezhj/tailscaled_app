@@ -456,6 +456,12 @@ struct AgentTerminalView: View {
     private var terminalSurface: some View {
         terminalScreen
             .id(attach.terminalID)
+            // A recovery/switch replaces the whole terminal pipeline (new
+            // surfaceID); the new UIKit view would otherwise animate from its
+            // initial frame to the full layout — the "half screen that expands
+            // from the top-left" on foreground return. No animation on
+            // replacement, so the new surface lands at its final size.
+            .animation(nil, value: attach.terminalID)
         .overlay { statusOverlay }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             attachmentStatus

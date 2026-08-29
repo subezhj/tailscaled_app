@@ -15,7 +15,7 @@ import Observation
 @MainActor
 @Observable
 final class TerminalLocalScrollSettings {
-    private static let defaultsKey = "terminal-local-scroll-enabled"
+    private nonisolated static let defaultsKey = "terminal-local-scroll-enabled"
 
     private nonisolated(unsafe) let defaults: UserDefaults
 

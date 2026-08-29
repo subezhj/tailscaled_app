@@ -13,7 +13,7 @@ import Observation
 @MainActor
 @Observable
 final class TerminalNudgeSettings {
-    private static let defaultsKey = "terminal-refresh-nudge-enabled"
+    private nonisolated static let defaultsKey = "terminal-refresh-nudge-enabled"
 
     /// The single source of truth for whether nudging is on. Kept as a plain
     /// UserDefaults read so the terminal store can consult it without owning a

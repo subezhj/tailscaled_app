@@ -178,6 +178,10 @@ struct ContentView: View {
                 // Resume the silent-audio keepalive if the system dropped the
                 // audio session while we were away.
                 audioKeeper.didBecomeActive()
+                // The app may have been suspended on one network and resumed
+                // on another; re-dial the tailnet node if the interface
+                // changed while we were backgrounded.
+                tailnet.networkMayHaveChanged()
                 // Re-probes notification permission on every return, grace
                 // period or not: the user may have flipped it in the
                 // Settings app while we were backgrounded.

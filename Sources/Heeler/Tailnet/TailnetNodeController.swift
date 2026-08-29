@@ -1,5 +1,6 @@
 import Foundation
 import os
+import Network
 import TailscaleKit
 import HeelerSSH
 
@@ -52,6 +53,14 @@ final class TailnetNodeController: ObservableObject {
     private var processor: MessageProcessor?
     private let logger = TailnetLogger()
 
+    /// Watches for network path changes (WiFi↔cellular). iOS tears down every
+    /// existing connection on such a switch, including the node's control/DERP
+    /// sessions, so we re-dial via `up()` to restore the tailnet. Without this,
+    /// a node that was verified on WiFi goes stale on cellular and every SSH
+    /// attempt through the proxy fails.
+    private var pathMonitor: NWPathMonitor?
+    private var lastKnownInterfaceType: NWInterface.InterfaceType?
+
     /// Application Support state directory (persistent across launches).
     private var stateDirectory: String {
         let base = FileManager.default.urls(
@@ -85,6 +94,7 @@ final class TailnetNodeController: ObservableObject {
                 ephemeral: false)
             let node = try TailscaleNode(config: config, logger: logger)
             self.node = node
+            startPathMonitor()
             Task { [weak self] in
                 await self?.wireUp(node: node)
             }
@@ -205,6 +215,7 @@ final class TailnetNodeController: ObservableObject {
         let cancelProcessor = processor
         processor = nil
         localAPI = nil
+        stopPathMonitor()
         Task { [weak self] in
             cancelProcessor?.cancel()
             try? await node.close()
@@ -212,6 +223,65 @@ final class TailnetNodeController: ObservableObject {
             self?.state = .idle
             self?.tailnetName = nil
         }
+    }
+
+    // MARK: - Network path monitoring
+
+    /// Watches for WiFi↔cellular (or any interface) changes and re-dials the
+    /// node when the active interface changes. iOS tears down every existing
+    /// connection on such a switch, so the node's control/DERP sessions go
+    /// stale and need a fresh `up()` to restore the tailnet.
+    private func startPathMonitor() {
+        guard pathMonitor == nil else { return }
+        let monitor = NWPathMonitor()
+        self.pathMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            let current = Self.activeInterfaceType(path)
+            Task { @MainActor [weak self] in
+                self?.handleNetworkChange(to: current)
+            }
+        }
+        monitor.start(queue: .main)
+    }
+
+    private func stopPathMonitor() {
+        pathMonitor?.cancel()
+        pathMonitor = nil
+        lastKnownInterfaceType = nil
+    }
+
+    @MainActor
+    private func handleNetworkChange(to interface: NWInterface.InterfaceType?) {
+        guard isVerified, let node else { return }
+        if interface != lastKnownInterfaceType {
+            logger.log("Tailnet: network interface changed \(lastKnownInterfaceType?.rawValue ?? "nil") -> \(interface?.rawValue ?? "nil"); re-dialing")
+            lastKnownInterfaceType = interface
+            Task {
+                // Re-dial control plane + DERP over the new network path.
+                try? await node.up()
+            }
+        } else {
+            lastKnownInterfaceType = interface
+        }
+    }
+
+    /// The primary active interface from a path, or nil when none is usable.
+    private static func activeInterfaceType(_ path: NWPath) -> NWInterface.InterfaceType? {
+        if path.usesInterfaceType(.wifi) { return .wifi }
+        if path.usesInterfaceType(.cellular) { return .cellular }
+        if path.usesInterfaceType(.wiredEthernet) { return .wiredEthernet }
+        return nil
+    }
+
+    /// Re-check the network on foreground return: the app may have been
+    /// suspended on WiFi and resumed on cellular (or vice versa) without the
+    /// path monitor having seen the transition, leaving the node's sessions
+    /// stale. The monitor will not re-fire for the same path, so compare
+    /// against the current monitor snapshot and re-dial if it differs.
+    func networkMayHaveChanged() {
+        guard let pathMonitor, isVerified else { return }
+        let current = Self.activeInterfaceType(pathMonitor.currentPath)
+        handleNetworkChange(to: current)
     }
 
     /// Starts interactive login. `startLoginInteractive()` makes the node

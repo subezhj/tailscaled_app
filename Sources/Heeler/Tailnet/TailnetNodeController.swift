@@ -254,7 +254,7 @@ final class TailnetNodeController: ObservableObject {
     private func handleNetworkChange(to interface: NWInterface.InterfaceType?) {
         guard isVerified, let node else { return }
         if interface != lastKnownInterfaceType {
-            logger.log("Tailnet: network interface changed \(lastKnownInterfaceType?.rawValue ?? "nil") -> \(interface?.rawValue ?? "nil"); re-dialing")
+            logger.log("Tailnet: network interface changed \(lastKnownInterfaceType.map(String.init(describing:)) ?? "nil") -> \(interface.map(String.init(describing:)) ?? "nil"); re-dialing")
             lastKnownInterfaceType = interface
             Task {
                 // Re-dial control plane + DERP over the new network path.
@@ -266,7 +266,8 @@ final class TailnetNodeController: ObservableObject {
     }
 
     /// The primary active interface from a path, or nil when none is usable.
-    private static func activeInterfaceType(_ path: NWPath) -> NWInterface.InterfaceType? {
+    /// `nonisolated` because NWPathMonitor's callback runs off the main actor.
+    private nonisolated static func activeInterfaceType(_ path: NWPath) -> NWInterface.InterfaceType? {
         if path.usesInterfaceType(.wifi) { return .wifi }
         if path.usesInterfaceType(.cellular) { return .cellular }
         if path.usesInterfaceType(.wiredEthernet) { return .wiredEthernet }

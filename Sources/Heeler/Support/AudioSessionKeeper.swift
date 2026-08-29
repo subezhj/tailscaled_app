@@ -91,9 +91,17 @@ final class AudioSessionKeeper {
 
     private func configureAudioSession() throws {
         let session = AVAudioSession.sharedInstance()
-        // .playback with a silent player keeps the process running without
-        // requiring microphone permission or a mixing session.
-        try session.setCategory(.playback, mode: .default)
+        // .playback keeps the process alive in the background even when the
+        // screen is off, and a silent player is inaudible. mixWithOthers lets
+        // the user's music keep playing (we duck, not mute, their audio);
+        // duckOthers briefly lowers other apps' volume instead of interrupting.
+        // A plain .playback session would take over the audio route and pause
+        // whatever the user was listening to, which is what made the keepalive
+        // feel hostile.
+        try session.setCategory(
+            .playback,
+            mode: .default,
+            options: [.mixWithOthers, .duckOthers])
         try session.setActive(true)
     }
 

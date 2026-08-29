@@ -5,6 +5,7 @@ import SwiftUI
 /// the settings root, which owns the NavigationStack.
 struct TerminalAppearanceSettingsView: View {
     let terminal: TerminalSettings
+    @State private var nudge = TerminalNudgeSettings()
 
     var body: some View {
         Form {
@@ -21,6 +22,17 @@ struct TerminalAppearanceSettingsView: View {
             }
 
             Section {
+                Toggle("Refresh on Return", isOn: nudgeBinding)
+            } header: {
+                Text("Terminal Behavior")
+            } footer: {
+                Text(
+                    "When you return to a live terminal, shrink-and-restore its "
+                        + "size so herdr's interface redraws. Off keeps the layout "
+                        + "stable but the remote TUI may not repaint its latest state.")
+            }
+
+            Section {
                 themePickerLink(for: .light)
                 themePickerLink(for: .dark)
             } header: {
@@ -34,6 +46,12 @@ struct TerminalAppearanceSettingsView: View {
         }
         .navigationTitle("Terminal Appearance")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var nudgeBinding: Binding<Bool> {
+        Binding(
+            get: { nudge.isEnabled },
+            set: { nudge.isEnabled = $0 })
     }
 
     @ViewBuilder

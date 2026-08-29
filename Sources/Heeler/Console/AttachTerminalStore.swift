@@ -178,7 +178,9 @@ final class AttachTerminalStore {
         // changes, so the nudge is a shrink followed by a restore. Both ride
         // the reliable input queue, in order, on the live channel; the
         // store's own geometry is untouched, so a later real resize still
-        // compares against what the view last reported.
+        // compares against what the view last reported. Skipped when the
+        // user disables the nudge in Settings (Terminal › Refresh on Return).
+        guard TerminalNudgeSettings.nudgeEnabled() else { return }
         session.resize(cols: cols - 1, rows: rows)
         session.resize(cols: cols, rows: rows)
     }

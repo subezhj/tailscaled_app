@@ -148,8 +148,9 @@ final class SOCKS5ConnectorTests: XCTestCase {
     }
 
     func testSOCKS5AuthRoundTrip() async throws {
-        // Mirrors libtailscale's loopback proxy: it demands user/pass auth.
-        let server = try MiniSocksServer(requiredUser: "ts-user", requiredPass: "ts-pass")
+        // Mirrors tsnet's loopback proxy (tailscale.com/tsnet Loopback): fixed
+        // username "tsnet", random hex password, SOCKS5 username/password auth.
+        let server = try MiniSocksServer(requiredUser: "tsnet", requiredPass: "a1b2c3d4e5f60718293a4b5c6d7e8f90")
         defer { server.closeServer() }
 
         let serveTask = Task.detached { server.serveOnce() }
@@ -157,8 +158,8 @@ final class SOCKS5ConnectorTests: XCTestCase {
         let proxy = SOCKS5Connector.ProxyEndpoint(
             host: "127.0.0.1",
             port: server.port,
-            username: "ts-user",
-            password: "ts-pass")
+            username: "tsnet",
+            password: "a1b2c3d4e5f60718293a4b5c6d7e8f90")
         let fd = try await SOCKS5Connector.connect(
             via: proxy,
             to: "nas.tailnet.ts.net",

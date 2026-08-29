@@ -250,20 +250,17 @@ final class TailnetNodeController: ObservableObject {
             logger.log("Tailnet loopback: no usable address (\(loopback.address))")
             return
         }
-        let (user, pass) = splitCredential(loopback.proxyCredential)
+        // tsnet's loopback SOCKS5 server (tailscale.com/tsnet Loopback)
+        // authenticates with a FIXED username "tsnet" and the per-instance
+        // proxy credential as the password. The credential is a raw 32-char
+        // hex string — NOT "user:pass" — so passing it through splitCredential
+        // would send the hex as the username and fail auth on every dial.
         SocketConnector.socks5Proxy = SOCKS5Connector.ProxyEndpoint(
             host: ip,
             port: UInt16(port),
-            username: user,
-            password: pass)
+            username: "tsnet",
+            password: loopback.proxyCredential)
         logger.log("Tailnet SOCKS5 proxy active at \(ip):\(port)")
-    }
-
-    /// libtailscale vends the proxy credential as `"user:pass"`.
-    private func splitCredential(_ raw: String) -> (String?, String?) {
-        let parts = raw.split(separator: ":", maxSplits: 1)
-        guard parts.count == 2 else { return (raw, nil) }
-        return (String(parts[0]), String(parts[1]))
     }
 }
 

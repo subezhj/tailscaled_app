@@ -105,6 +105,8 @@ struct AgentComposerView: View {
     /// An explicit dismissal hides suggestions for the current trigger token;
     /// removing the token arms them again.
     @State private var isSuggestionsDismissed = false
+    /// Whether the expanded Agent-switcher panel is showing.
+    @State private var isSwitcherExpanded = false
 
     private var isToolsKeyboardPresented: Bool {
         keyboardPresentation == .tools
@@ -288,7 +290,8 @@ struct AgentComposerView: View {
                         isKeyboardUp: isKeyboardPresented,
                         toggleKeyboard: dismissOrPresentKeyboard,
                         isToolsKeyboardPresented: isToolsKeyboardPresented,
-                        switchKeyboard: keyboardSwitchAction)
+                        switchKeyboard: keyboardSwitchAction,
+                        onExpand: { isSwitcherExpanded = true })
                 }
                 .background(
                     .regularMaterial,
@@ -329,6 +332,24 @@ struct AgentComposerView: View {
                 // then reuse (the ConsoleStore caches underneath).
                 Task { await skills.loadIfNeeded() }
             }
+        }
+        // The expanded Agent switcher: a grid of every Agent, so a long list
+        // of terminals doesn't require endless horizontal swiping in the chip
+        // strip. Presenting as a sheet keeps the composer and keyboard state
+        // intact underneath.
+        .sheet(isPresented: $isSwitcherExpanded) {
+            AgentSwitcherPanel(
+                switcher: focusPreservingSwitcher,
+                onSelect: { id in
+                    isSwitcherExpanded = false
+                    if isInputFocused {
+                        keyboardHandoff.arm(for: id)
+                    }
+                    switcher.onSelect(id)
+                })
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
+            .presentationBackground(.regularMaterial)
         }
     }
 
@@ -788,7 +809,17 @@ struct AgentToolsKeyboard: View {
             .padding(.vertical, 2)
         }
         .frame(height: height)
-        .background(Color(uiColor: .systemBackground).ignoresSafeArea(edges: .bottom))
+        // iOS-keyboard-style top rounded corners: the tools dock replaces the
+        // system keyboard, so it should read as a rounded surface sitting over
+        // the terminal, not a raw right-angle rectangle.
+        .background(
+            Color(uiColor: .systemBackground),
+            in: UnevenRoundedRectangle(
+                topLeadingRadius: 20,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: 0,
+                topTrailingRadius: 20))
+        .ignoresSafeArea(edges: .bottom)
         .onChange(of: selectedTab) { _, tab in
             guard tab == .skills, let skills = context.skills else { return }
             Task { await skills.store.loadIfNeeded() }

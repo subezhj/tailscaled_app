@@ -3,7 +3,7 @@ import UIKit
 
 /// One chip in the keyboard's Agent switcher: the label it shows, the
 /// status its dot carries, and whether it is pinned.
-struct TerminalAgentSwitcherItem: Equatable, Sendable {
+struct TerminalAgentSwitcherItem: Equatable, Sendable, Identifiable {
     let id: ConsoleAgent.ID
     let title: String
     let status: AgentStatus
@@ -495,6 +495,81 @@ final class TerminalAgentChip: UIControl {
     }
 }
 
+/// The expanded Agent switcher: every Agent as a card in a grid, so a long
+/// list of terminals doesn't mean endless horizontal swiping in the chip
+/// strip. Presented as a sheet over the terminal; selecting an Agent dismisses
+/// and switches.
+struct AgentSwitcherPanel: View {
+    let switcher: TerminalAgentSwitcher
+    let onSelect: @MainActor (ConsoleAgent.ID) -> Void
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 150), spacing: 12),
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(switcher.items) { item in
+                        AgentSwitcherCard(item: item, isSelected: item.id == switcher.selectedID) {
+                            onSelect(item.id)
+                        }
+                    }
+                }
+                .padding(16)
+            }
+            .navigationTitle("Agents")
+            .navigationBarTitleDisplayMode(.inline)
+        }
+    }
+}
+
+/// One Agent card in the expanded switcher: status dot, title, selected ring.
+private struct AgentSwitcherCard: View {
+    let item: TerminalAgentSwitcherItem
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(item.status.inkUIColor)
+                        .frame(width: 8, height: 8)
+                    if item.isPinned {
+                        Image(systemName: "pin.fill")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                }
+                Text(item.title)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(2)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                isSelected
+                    ? Color.accentColor.opacity(0.14)
+                    : Color(uiColor: .secondarySystemFill),
+                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .stroke(
+                        isSelected ? Color.accentColor : .clear,
+                        lineWidth: isSelected ? 2 : 0)
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(item.title)
+        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
+    }
+}
+
 /// The resident Agent strip: the chips over their own fill, with the keyboard
 /// toggle pinned at the trailing edge — outside the scroll view, so the one
 /// control that summons the keyboard back can never scroll out of reach.
@@ -504,6 +579,8 @@ struct TerminalAgentSwitcherRow: View {
     let toggleKeyboard: () -> Void
     var isToolsKeyboardPresented = false
     var switchKeyboard: (() -> Void)?
+    /// Opens the expanded Agent switcher panel.
+    var onExpand: (() -> Void)? = nil
     /// Matches `UIPasteControl`'s fixed glyph size in the row below, or the
     /// two read as icons borrowed from different sets.
     private static let glyphPointSize: CGFloat = 12
@@ -544,6 +621,15 @@ struct TerminalAgentSwitcherRow: View {
                 .contentTransition(.symbolEffect(.replace))
             }
             .accessibilityLabel(isKeyboardUp ? "Dismiss keyboard" : "Show keyboard")
+            if let onExpand {
+                Button(action: onExpand) {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: Self.glyphPointSize, weight: .semibold))
+                        .foregroundStyle(Color(uiColor: .label))
+                        .frame(width: 44, height: TerminalAgentSwitcherBar.preferredHeight)
+                }
+                .accessibilityLabel("Show all Agents")
+            }
             .padding(.trailing, 8)
         }
         .frame(height: TerminalAgentSwitcherBar.preferredHeight)
@@ -552,7 +638,10 @@ struct TerminalAgentSwitcherRow: View {
                 .fill(Color(uiColor: .separator))
                 .frame(height: hairline)
         }
-        .background(Color(uiColor: .secondarySystemBackground))
+        // Transparent: the switcher sits inside the Composer's rounded
+        // material container, so a solid background here would paint a
+        // right-angle rectangle over the rounded corners.
+        .background(Color.clear)
     }
 
     private struct StripRepresentable: UIViewRepresentable {

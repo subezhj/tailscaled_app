@@ -160,7 +160,7 @@ struct TailnetSettingsView: View {
     /// Diagnostics: whether recent SSH connections rode the tailnet proxy and
     /// whether they succeeded. Helps answer "did my SSH go through Tailscale?"
     private var routingSection: some View {
-        Section("SSH Routing") {
+        Section {
             Toggle("Force Direct (bypass Tailscale)", isOn: forceDirectBinding)
             if let report = dialReport {
                 LabeledContent("Last: Host", value: report.host)

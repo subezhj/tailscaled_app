@@ -121,6 +121,21 @@ struct TailnetSettingsView: View {
 
     private var statusSection: some View {
         Section("Status") {
+            if controller.isVerified {
+                Label {
+                    Text("Verified")
+                } icon: {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(.green)
+                }
+            } else {
+                Label {
+                    Text("Not verified")
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
+            }
             LabeledContent("State", value: stateText)
             if let ip = ipv4Text {
                 LabeledContent("Tailnet IP", value: ip)

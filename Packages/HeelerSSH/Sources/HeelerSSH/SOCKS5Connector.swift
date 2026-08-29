@@ -53,9 +53,11 @@ public enum SOCKS5Connector {
         targetPort: UInt16,
         until deadline: ContinuousClock.Instant
     ) async throws -> Int32 {
-        // 1. Open the TCP connection to the SOCKS5 proxy.
+        // 1. Open the TCP connection to the SOCKS5 proxy. This must NOT go
+        //    through `SocketConnector.connect(to:)` — it would re-enter the
+        //    SOCKS5 path (stack overflow). Direct dial only.
         let proxyEndpoint = SSHEndpoint(host: proxy.host, port: proxy.port)
-        let descriptor = try await SocketConnector.connect(to: proxyEndpoint, until: deadline)
+        let descriptor = try await SocketConnector.connectDirect(to: proxyEndpoint, until: deadline)
 
         // 2. Non-blocking so we can honor the deadline while handshaking.
         let flags = fcntl(descriptor, F_GETFL, 0)

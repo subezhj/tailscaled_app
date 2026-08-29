@@ -28,7 +28,18 @@ public enum SocketConnector {
                 targetPort: endpoint.port,
                 until: deadline)
         }
-        return try await connect(
+        return try await connectDirect(to: endpoint, until: deadline)
+    }
+
+    /// Direct dial without any SOCKS5 indirection. Used both for ordinary
+    /// connections and (critically) by `SOCKS5Connector` to reach the proxy
+    /// itself — routing the proxy connection back through `connect(to:)`
+    /// re-enters the SOCKS5 path and stack-overflows.
+    static func connectDirect(
+        to endpoint: SSHEndpoint,
+        until deadline: ContinuousClock.Instant
+    ) async throws -> Int32 {
+        try await connect(
             to: endpoint,
             until: deadline,
             resolver: DNSServiceAddressResolver(),

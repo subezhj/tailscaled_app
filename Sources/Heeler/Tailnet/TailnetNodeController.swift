@@ -32,6 +32,10 @@ final class TailnetNodeController: ObservableObject {
     @Published private(set) var state: NodeState = .idle
     @Published private(set) var tailnetName: String?
     @Published private(set) var isSocksProxyActive = false
+    /// True once the node has authenticated and reached Running. This is the
+    /// authoritative "login really succeeded" signal (the IPN bus only emits
+    /// Running after the control plane has accepted the node).
+    @Published private(set) var isVerified = false
     /// Non-nil while a browser login is required (and not yet complete).
     /// The view presents an `ASWebAuthenticationSession` when this is set.
     @Published private(set) var pendingLoginURL: URL?
@@ -139,14 +143,15 @@ final class TailnetNodeController: ObservableObject {
             switch state {
             case .NeedsLogin:
                 self.state = .needsLogin
+                isVerified = false
                 if let urlString = notify.BrowseToURL, let url = URL(string: urlString) {
                     pendingLoginURL = url
                 }
             case .Running:
-                self.state = .running(ipv4: self.loopback?.ip)
+                isVerified = true
                 isSocksProxyActive = true
                 pendingLoginURL = nil
-                refreshTailnetName()
+                refreshRunningState()
             case .Starting, .NoState, .Stopped:
                 break
             @unknown default:
@@ -159,15 +164,25 @@ final class TailnetNodeController: ObservableObject {
         }
     }
 
-    private func refreshTailnetName() {
+    /// Fetch the authoritative tailnet facts once the node is Running: the
+    /// real tailnet IP(s) from `addrs()` (NOT the loopback proxy address) and
+    /// the node's MagicDNS name from statusJSON.
+    private func refreshRunningState() {
         guard let node else { return }
         Task { [weak self] in
+            var ip: String?
+            var name: String?
+            if let ips = try? await node.addrs() {
+                ip = ips.ip4 ?? ips.ip6
+            }
             if let data = try? await node.statusJSON(),
                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                let selfNode = json["Self"] as? [String: Any],
                let dnsName = selfNode["DNSName"] as? String {
-                self?.tailnetName = dnsName
+                name = dnsName
             }
+            self?.state = .running(ipv4: ip)
+            self?.tailnetName = name
         }
     }
 
@@ -175,6 +190,7 @@ final class TailnetNodeController: ObservableObject {
         guard let node else { return }
         // Point SSH back at direct dialing first.
         SocketConnector.socks5Proxy = nil
+        isVerified = false
         isSocksProxyActive = false
         loopback = nil
         pendingLoginURL = nil

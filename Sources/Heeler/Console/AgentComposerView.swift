@@ -294,7 +294,7 @@ struct AgentComposerView: View {
                         onExpand: { isSwitcherExpanded = true })
                 }
                 .background(
-                    .regularMaterial,
+                    Color(uiColor: .secondarySystemBackground),
                     in: RoundedRectangle(cornerRadius: 24, style: .continuous)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))

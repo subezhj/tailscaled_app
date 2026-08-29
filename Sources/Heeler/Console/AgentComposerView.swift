@@ -811,9 +811,12 @@ struct AgentToolsKeyboard: View {
         .frame(height: height)
         // iOS-keyboard-style top rounded corners: the tools dock replaces the
         // system keyboard, so it should read as a rounded surface sitting over
-        // the terminal, not a raw right-angle rectangle.
+        // the terminal, not a raw right-angle rectangle. Matches the composer
+        // bar's secondarySystemBackground so the whole bottom chrome reads as
+        // one surface (systemBackground is pure black in dark mode and looked
+        // like a jarring black bar).
         .background(
-            Color(uiColor: .systemBackground),
+            Color(uiColor: .secondarySystemBackground),
             in: UnevenRoundedRectangle(
                 topLeadingRadius: 20,
                 bottomLeadingRadius: 0,

@@ -536,7 +536,7 @@ private struct AgentSwitcherCard: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
                     Circle()
-                        .fill(item.status.inkUIColor)
+                        .fill(Color(uiColor: item.status.inkUIColor))
                         .frame(width: 8, height: 8)
                     if item.isPinned {
                         Image(systemName: "pin.fill")
@@ -629,8 +629,8 @@ struct TerminalAgentSwitcherRow: View {
                         .frame(width: 44, height: TerminalAgentSwitcherBar.preferredHeight)
                 }
                 .accessibilityLabel("Show all Agents")
+                .padding(.trailing, 8)
             }
-            .padding(.trailing, 8)
         }
         .frame(height: TerminalAgentSwitcherBar.preferredHeight)
         .background(alignment: .top) {

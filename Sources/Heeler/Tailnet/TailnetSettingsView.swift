@@ -180,7 +180,8 @@ struct TailnetSettingsView: View {
             Text(
                 "Tailnet destinations (100.x, *.ts.net) ride the embedded node's "
                     + "SOCKS5 proxy; everything else connects directly. Force Direct "
-                    + "bypasses the proxy for diagnosis.")
+                    + "bypasses the proxy for non-tailnet hosts (LAN, public IPs) when "
+                    + "diagnosing a connection.")
         }
     }
 

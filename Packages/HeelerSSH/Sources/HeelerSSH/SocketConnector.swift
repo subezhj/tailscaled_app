@@ -14,9 +14,12 @@ public enum SocketConnector {
     }
     private static nonisolated(unsafe) var _socks5Proxy: SOCKS5Connector.ProxyEndpoint?
 
-    /// Diagnostic override: when true, even tailnet destinations are dialed
-    /// directly (bypassing the proxy). Lets the user prove whether a failure
-    /// is the proxy path or the target host.
+    /// Diagnostic override: when true, non-tailnet destinations (LAN, public
+    /// IPs) are dialed directly instead of through the SOCKS5 proxy. Lets the
+    /// user prove whether a failure is the proxy path or the target host.
+    /// Tailnet destinations are unaffected — there is no route to
+    /// 100.64.0.0/10 without the embedded node, so they always ride the
+    /// proxy.
     public static var forceDirect: Bool {
         get { _forceDirect }
         set { _forceDirect = newValue }
@@ -56,10 +59,16 @@ public enum SocketConnector {
         // fd7a:/48) ride the embedded node's SOCKS5 proxy — the tsnet proxy
         // cannot dial non-tailnet hosts, so routing everything through it
         // breaks LAN/public destinations with connectionFailed. Everything
-        // else dials directly. `forceDirect` bypasses the proxy even for
-        // tailnet targets (diagnostics).
+        // else dials directly.
+        //
+        // `forceDirect` skips the proxy for non-tailnet hosts (LAN, public
+        // IPs) so the user can rule the proxy path out of a diagnosis.
+        // Tailnet destinations always go through the proxy regardless of
+        // forceDirect — there is no route to 100.64.0.0/10 on iOS without
+        // the embedded node, so a forced direct dial would always fail
+        // (connectionFailed / timeout).
         let isTailnet = TailnetTarget.isTailnet(endpoint.host)
-        let viaProxy = (socks5Proxy != nil) && isTailnet && !forceDirect
+        let viaProxy = (socks5Proxy != nil) && isTailnet
         do {
             let descriptor: Int32
             if viaProxy, let proxy = socks5Proxy {

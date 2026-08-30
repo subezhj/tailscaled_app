@@ -94,7 +94,8 @@ jobs:
           BUILD=$(awk -F'"' '/CURRENT_PROJECT_VERSION/ {print $2; exit}' project.yml)
           echo "marketing=${MARKETING:-0.0.0}" >> "$GITHUB_OUTPUT"
           echo "build=${BUILD:-0}" >> "$GITHUB_OUTPUT"
-          echo "version=${MARKETING:-0.0.0} (${BUILD:-0})" >> "$GITHUB_OUTPUT"
+          # A filename-safe version: MARKETING-BUILD, no spaces or parens.
+          echo "fileversion=${MARKETING:-0.0.0}-${BUILD:-0}" >> "$GITHUB_OUTPUT"
 
       # ---- Archive ----
       - name: Archive (unsigned)
@@ -179,27 +180,34 @@ jobs:
 
       - name: Package zip (IPA only, no source)
         run: |
+          rm -rf build/dist
           mkdir -p build/dist
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ steps.version.outputs.fileversion }}"
           SIGN="${{ github.event.inputs.signing || 'unsigned' }}"
-          # Always name the unsigned IPA for the default path.
-          if [ -f build/Heeler-unsigned.ipa ]; then
-            cp build/Heeler-unsigned.ipa "build/dist/Heeler-${VERSION}-unsigned.ipa"
+          # Exactly one ipa per build, named with the version and signing mode.
+          if [ "$SIGN" = "development" ]; then
+            SRC=build/Heeler-signed.ipa
+            DST="build/dist/Heeler-${VERSION}-signed.ipa"
+          else
+            SRC=build/Heeler-unsigned.ipa
+            DST="build/dist/Heeler-${VERSION}-unsigned.ipa"
           fi
-          if [ -f build/Heeler-signed.ipa ]; then
-            cp build/Heeler-signed.ipa "build/dist/Heeler-${VERSION}-signed.ipa"
+          if [ ! -f "$SRC" ]; then
+            echo "::error::$SRC not found"
+            exit 1
           fi
+          cp "$SRC" "$DST"
           cd build/dist
-          zip -qry "../Heeler-${VERSION}-${SIGN}.zip" .
+          zip -qry "../Heeler-${VERSION}-${SIGN}.zip" "$(basename "$DST")"
           cd ../..
+          echo "=== zip contents ==="
+          unzip -l "build/Heeler-${VERSION}-${SIGN}.zip"
           ls -la build/dist build/Heeler-*.zip
 
       - name: Upload IPA zip artifact
         uses: actions/upload-artifact@v4
         with:
           name: Heeler-IPA
-          path: |
-            build/Heeler-*.zip
-            build/dist/*.ipa
+          path: build/Heeler-*.zip
           if-no-files-found: error
           retention-days: 30

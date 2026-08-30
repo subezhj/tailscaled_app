@@ -142,7 +142,10 @@ struct ContentView: View {
         // the console so tailnet Hosts that failed a cold-start attempt
         // (because the proxy wasn't ready yet) connect automatically instead
         // of waiting for a manual reconnect.
-        .onChange(of: tailnet.isVerified, initial: false) { _, verified in
+        // `initial: true` ensures this fires even when the node was already
+        // Running before the observer attached (fast restore on a logged-in
+        // node with ephemeral: false).
+        .onChange(of: tailnet.isVerified, initial: true) { _, verified in
             if verified {
                 Task { await console.reactivate() }
             }

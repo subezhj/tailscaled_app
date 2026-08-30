@@ -37,3 +37,4 @@ __pycache__/
 # Agent workspace (research reports, scratch)
 .claude/
 CODE_LOOP.md
+code_perf.md

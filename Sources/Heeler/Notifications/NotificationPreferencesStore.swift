@@ -232,6 +232,12 @@ final class NotificationPreferencesStore {
             TransportError.herdrBinaryNotFound.presentation.message
         case is TransportError:
             "The connection to the Host failed."
+        case is KeychainError:
+            "Could not save the notification key to the Keychain. "
+                + "The app may be missing the App Group entitlement "
+                + "(group.dev.bybee.heeler.sube.shared)."
+        case is NotificationKeyStoreError:
+            "Could not save the notification key."
         default:
             "Could not update notification settings. Try again."
         }

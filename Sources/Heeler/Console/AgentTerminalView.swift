@@ -55,6 +55,9 @@ struct AgentTerminalView: View {
     @State private var isShowingWorktree = false
     @State private var worktreeStore: WorktreeDetailStore?
     @State private var isShowingAttachLinks = false
+    /// Alternate-screen terminal history overlay (`pane.read`-fed). Opened by
+    /// scrolling toward older content; see `TerminalScreenView.onHistoryRequested`.
+    @State private var isShowingHistory = false
     @State private var closeErrorMessage: String?
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
@@ -156,6 +159,9 @@ struct AgentTerminalView: View {
         screen.onSend = { keystrokes in attach.send(keystrokes) }
         screen.onScroll = { sequence, rows in
             attach.scroll(sequence, rows: rows)
+        }
+        screen.onHistoryRequested = {
+            isShowingHistory = true
         }
         screen.keyboardControl = keyboardControl
         screen.isLocalInputEnabled = false
@@ -271,6 +277,22 @@ struct AgentTerminalView: View {
                 set: { if !$0 { attach.cancelPaste() } })
         ) {
             pasteReviewSheet
+        }
+        // Alternate-screen scrollback: herdr's TUI lives in ghostty's
+        // alternate screen, where local scrollback is empty. Scrolling up
+        // fetches recent pane text via `pane.read` and shows it in a
+        // scrollable overlay — instant local scrolling once fetched, instead
+        // of one network RTT per gesture.
+        .sheet(isPresented: $isShowingHistory) {
+            TerminalHistorySheet(
+                hostID: agent.hostID,
+                paneID: agent.agent.paneID,
+                readHistory: { [console] hostID, paneID, lines in
+                    try await console.readRecentHistory(
+                        hostID: hostID, paneID: paneID, lines: lines)
+                })
+            .presentationDetents([.medium, .large])
+            .presentationDragIndicator(.visible)
         }
         .confirmationDialog(
             "Close \(title)?", isPresented: $isConfirmingClose, titleVisibility: .visible
@@ -822,5 +844,76 @@ private struct AttachmentStatusBar<Actions: View>: View {
         .overlay(alignment: .top) { Divider() }
         .accessibilityElement(children: .contain)
         .accessibilityLabel(accessibilityLabel)
+    }
+}
+
+/// Alternate-screen scrollback overlay for an Agent terminal.
+///
+/// herdr's TUI runs in ghostty's alternate screen, where ghostty keeps no
+/// scrollback, so local scrolling has nothing to show and remote scrolling
+/// costs a network round-trip per gesture. This sheet fetches the last N
+/// lines of pane output once via `pane.read` (`recent_unwrapped`, ANSI
+/// stripped) and displays them in a SwiftUI ScrollView that scrolls
+/// locally — one round-trip per screenful of history instead of one per
+/// tick of a pan gesture.
+private struct TerminalHistorySheet: View {
+    let hostID: Host.ID
+    let paneID: String
+    /// Fetches plain-text pane history. Throws on failure.
+    let readHistory: @Sendable (Host.ID, String, Int) async throws -> String
+
+    @State private var text: String?
+    @State private var failureMessage: String?
+    @Environment(\.dismiss) private var dismiss
+
+    private static let linesPerFetch = 200
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let failureMessage {
+                    ContentUnavailableView {
+                        Label("History Unavailable", systemImage: "doc.questionmark")
+                    } description: {
+                        Text(failureMessage)
+                    } actions: {
+                        Button("Try Again") { Task { await load() } }
+                        Button("Close") { dismiss() }
+                    }
+                } else if let text {
+                    // `Text` with a ScrollView gives natural line breaks and
+                    // selection; `List` would chunk a big document into
+                    // rows. Monospaced to preserve the pane's layout.
+                    ScrollView {
+                        Text(text)
+                            .font(.system(.body, design: .monospaced))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding()
+                            .textSelection(.enabled)
+                    }
+                } else {
+                    ProgressView("Loading history…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+            }
+            .navigationTitle("Terminal History")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func load() async {
+        text = nil
+        failureMessage = nil
+        do {
+            text = try await readHistory(hostID, paneID, Self.linesPerFetch)
+        } catch {
+            failureMessage = error.localizedDescription
+        }
     }
 }

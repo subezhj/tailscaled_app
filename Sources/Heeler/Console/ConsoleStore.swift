@@ -317,6 +317,24 @@ final class ConsoleStore {
         }
     }
 
+    /// The terminal history overlay's data source: the last `lines` lines of
+    /// a pane's output as plain text (`pane.read` with `recent_unwrapped`,
+    /// ANSI stripped). This is what makes scrollback usable over a slow
+    /// tailnet/DERP path — one round-trip fetches a screenful of history,
+    /// and the overlay scrolls it locally instead of one RTT per gesture.
+    func readRecentHistory(hostID: Host.ID, paneID: String, lines: Int = 200) async throws -> String {
+        try await projection(for: hostID).session.withTransport { transport in
+            try await transport.readPane(
+                PaneReadParams(
+                    paneID: paneID,
+                    source: .recentUnwrapped,
+                    format: .text,
+                    lines: lines,
+                    stripANSI: true))
+                .text
+        }
+    }
+
     /// One Composer per selected Agent for the lifetime of its Host catalog
     /// entry. The Console detail may be replaced by a reconnect placeholder;
     /// retaining the store here keeps its entirely local draft intact.

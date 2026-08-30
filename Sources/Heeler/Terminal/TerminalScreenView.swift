@@ -86,6 +86,10 @@ struct TerminalScreenView: UIViewRepresentable {
     /// closure rather than a stored flag keeps the answer tied to the
     /// surface's creation instead of to how often SwiftUI evaluates the body.
     var claimsKeyboard: (@MainActor () -> Bool)?
+    /// The user scrolled toward older content while the terminal is in
+    /// alternate-screen mode (herdr's TUI) and local scrollback has nothing
+    /// to show. The owner presents a history overlay fed by `pane.read`.
+    var onHistoryRequested: (() -> Void)?
     /// Handed the surface once it exists, so the Agent strip's toggle can
     /// raise and lower this terminal's keyboard.
     var keyboardControl: TerminalKeyboardControl?
@@ -112,6 +116,7 @@ struct TerminalScreenView: UIViewRepresentable {
         // Only here, never in updateUIView: the intent belongs to this
         // terminal's first appearance, not to every state change after it.
         view.raisesKeyboardWhenReady = claimsKeyboard?() ?? false
+        view.onHistoryRequested = onHistoryRequested
         keyboardControl?.terminal = view
         view.setLocalInputEnabled(isLocalInputEnabled)
         // The feed holds the surface weakly so a replaced UIKit view cannot be
@@ -167,6 +172,7 @@ struct TerminalScreenView: UIViewRepresentable {
         view.applyFontSize(fontSize)
         view.applyFontFamily(fontFamily)
         view.onFontSizeChanged = onFontSizeChanged
+        view.onHistoryRequested = onHistoryRequested
         // Deliberately no viewport read here. A SwiftUI update must not write
         // back into the state it was driven by: reporting the viewport text
         // feeds the Attach Link index, whose observers include this very view,
@@ -295,6 +301,9 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
     private(set) var appliedFontFamily: String?
     var onFontSizeChanged: ((Float) -> Void)?
     var onOpenLink: ((URL) -> Void)?
+    /// Scrolled toward older content in alternate-screen mode with an empty
+    /// local scrollback; the owner presents a `pane.read`-fed history overlay.
+    var onHistoryRequested: (() -> Void)?
     /// Raises the keyboard once this surface reaches a window. An Agent switch
     /// rebuilds the whole terminal, and the user who tapped a switcher chip
     /// was mid-conversation — dropping the keyboard would hide the switcher
@@ -320,6 +329,9 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
     /// signal can fail to arrive. Tests stretch it so a loaded runner cannot
     /// end a handoff out from under them (#225).
     var keyboardTransitionFallbackDelay: TimeInterval = 0.5
+    /// Tracks whether the current pan gesture has already fired
+    /// `onHistoryRequested`. Reset on every gesture start.
+    private var historyRequestedThisGesture = false
     private var keyboardGridReportTask: Task<Void, Never>?
     /// How long Ghostty gets to answer a settled layout before its grid is
     /// forwarded to the Host — long enough to coalesce one layout pass's
@@ -1047,6 +1059,22 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
 
         let towardOlderContent = rows > 0
         let rowCount = abs(rows)
+
+        // Alternate-screen (herdr TUI): ghostty's local scrollback is empty,
+        // so `scroll_page_lines` would do nothing, and remote scroll
+        // sequences cost a network RTT per gesture. When the owner provides
+        // a history hook, scrolling toward older content presents a
+        // `pane.read`-fed overlay that scrolls locally — one fetch per
+        // screenful instead of one RTT per tick. Throttled to once per
+        // gesture so every tick of the pan gesture doesn't fire it.
+        if modeTracker.isAlternateScreen, towardOlderContent,
+            !historyRequestedThisGesture, onHistoryRequested != nil
+        {
+            historyRequestedThisGesture = true
+            onHistoryRequested?()
+            return rows
+        }
+
         // Local-scroll preference: skip the remote round-trip entirely and
         // page ghostty's own buffer. Instant, but in alternate-screen mode
         // ghostty may have little scrollback to show. Off (default) sends
@@ -1197,6 +1225,7 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
         case .began:
             stopTouchScrollMomentum()
             touchScrollAccumulator.reset()
+            historyRequestedThisGesture = false
         case .changed:
             _ = scrollTouch(translationY: gesture.translation(in: self).y)
             gesture.setTranslation(.zero, in: self)

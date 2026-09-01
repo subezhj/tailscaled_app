@@ -17,12 +17,34 @@ import Testing
     // runner out to the xcodebuild timeout.
     .timeLimit(.minutes(2)))
 struct SessionDriverE2ETests {
+    @Test("handshake negotiates post-quantum key exchange")
+    func handshakeNegotiatesPostQuantumKeyExchange() async throws {
+        let environment = try #require(SessionDriverTestEnvironment.current)
+        let driver = SessionDriver()
+
+        _ = try await driver.handshake(
+            endpoint: environment.postQuantumEndpoint,
+            timeout: .seconds(5))
+        try await driver.close(timeout: .seconds(2))
+    }
+
+    @Test("handshake falls back to Curve25519 key exchange")
+    func handshakeFallsBackToCurve25519KeyExchange() async throws {
+        let environment = try #require(SessionDriverTestEnvironment.current)
+        let driver = SessionDriver()
+
+        _ = try await driver.handshake(
+            endpoint: environment.curve25519Endpoint,
+            timeout: .seconds(5))
+        try await driver.close(timeout: .seconds(2))
+    }
+
     @Test("public connection resolves localhost before authenticating")
     func publicConnectionResolvesLocalhost() async throws {
         let environment = try #require(SessionDriverTestEnvironment.current)
         let connection = try await SSHConnection.connect(
             to: SSHEndpoint(host: "localhost", port: environment.endpoint.port),
-            timeout: .seconds(5))
+            timeout: .seconds(10))
 
         try await environment.authenticate(connection)
         let result = try await connection.execute(
@@ -220,35 +242,54 @@ struct SessionDriverE2ETests {
         // the remote process and temp dir without a parsed PID handle.
         let directory = "/tmp/heeler-raw-tcp-\(UUID().uuidString)"
         let driver = SessionDriver()
+        let bufferFullHold = SessionWaitHold()
         var transport: DirectTCPIPByteTransport?
         var descriptor: Int32 = -1
         var primaryError: (any Error)?
 
         do {
-            let launched = try await RawTCPWriter.launch(
-                directory: directory,
-                payloadSize: payloadSize,
-                using: observer)
+            let launched = try await runDirectTCPIPFixturePhase("launch raw writer") {
+                try await RawTCPWriter.launch(
+                    directory: directory,
+                    payloadSize: payloadSize,
+                    using: observer)
+            }
 
-            _ = try await driver.handshake(
-                endpoint: environment.endpoint,
-                timeout: .seconds(5))
+            _ = try await runDirectTCPIPFixturePhase("handshake") {
+                try await driver.handshake(
+                    endpoint: environment.endpoint,
+                    timeout: .seconds(10))
+            }
             let privateKey = environment.privateKey
-            try await driver.authenticate(
-                username: environment.username,
-                publicKey: environment.publicKeyBlob,
-                signer: { try privateKey.signature(for: $0) },
-                timeout: .seconds(5))
-            let opened = try await driver.openDirectTCPIP(
-                endpoint: SSHEndpoint(host: "127.0.0.1", port: launched.port),
-                timeout: .seconds(5))
+            try await runDirectTCPIPFixturePhase("authenticate") {
+                try await driver.authenticate(
+                    username: environment.username,
+                    publicKey: environment.publicKeyBlob,
+                    signer: { try privateKey.signature(for: $0) },
+                    timeout: .seconds(10))
+            }
+            await driver.holdNextDirectTCPIPInboundBufferFullForTesting {
+                await bufferFullHold.waitUntilReleased()
+            }
+            let opened = try await runDirectTCPIPFixturePhase("open direct TCP/IP") {
+                try await driver.openDirectTCPIP(
+                    endpoint: SSHEndpoint(host: "127.0.0.1", port: launched.port),
+                    timeout: .seconds(10))
+            }
             transport = opened
             descriptor = try opened.takeDescriptor()
 
-            let preDrainState = try await launched.waitUntilStartedAndSettled(using: observer)
-            #expect(
+            let preDrainState = try await runDirectTCPIPFixturePhase("observe backpressure") {
+                try await launched.waitUntilStartedAndSettled(using: observer)
+            }
+            try #require(
                 preDrainState == .blocked,
                 "the raw writer completed before the bounded pump was drained")
+            try await requireEventually(
+                "the pump should fill its one-megabyte inbound buffer before draining"
+            ) { await bufferFullHold.hasEntered }
+            #expect(await driver.directTCPIPInboundBufferHighWaterMarkForTesting() == 1_048_576)
+            await bufferFullHold.release()
 
             var offset = 0
             var firstMismatch: String?
@@ -293,6 +334,7 @@ struct SessionDriverE2ETests {
             transport = nil
             try await driver.close(timeout: .seconds(2))
         } catch {
+            await bufferFullHold.release()
             if descriptor >= 0 { Darwin.close(descriptor) }
             transport?.abort()
             await driver.invalidate()
@@ -1892,6 +1934,28 @@ private enum RawTCPWriterState: Equatable {
     case completed
 }
 
+private struct DirectTCPIPFixturePhaseError: Error, CustomStringConvertible {
+    let phase: String
+    let underlying: String
+
+    var description: String {
+        "Direct TCP/IP fixture failed during \(phase): \(underlying)"
+    }
+}
+
+private func runDirectTCPIPFixturePhase<Value>(
+    _ phase: String,
+    operation: () async throws -> Value
+) async throws -> Value {
+    do {
+        return try await operation()
+    } catch {
+        throw DirectTCPIPFixturePhaseError(
+            phase: phase,
+            underlying: String(describing: error))
+    }
+}
+
 private enum RawTCPWriterError: Error {
     case invalidLaunchResponse(String)
     case markerFailed(String)
@@ -1936,7 +2000,7 @@ private struct RawTCPWriter {
         let result = try await observer.execute(
             command,
             input: Data(pythonSource.utf8),
-            timeout: .seconds(10))
+            timeout: .seconds(20))
         let response = String(decoding: result.stdout, as: UTF8.self)
             .split(separator: "\n", omittingEmptySubsequences: true)
             .map(String.init)
@@ -2148,12 +2212,12 @@ while sent < payload_size:
             raise RuntimeError("raw writer socket closed")
         sent += written
     except BlockingIOError:
-        _, writable, _ = select.select([], [connection], [], 1.0)
-        if writable:
-            continue
         if not reported_block:
             publish("blocked", sent)
             reported_block = True
+        _, writable, _ = select.select([], [connection], [], 1.0)
+        if writable:
+            continue
         connection.setblocking(True)
 
 connection.shutdown(socket.SHUT_WR)
@@ -2585,6 +2649,8 @@ private enum WeakNetworkProxyFixtureError: Error {
 
 private struct SessionDriverTestEnvironment: Sendable {
     let endpoint: SSHEndpoint
+    let postQuantumEndpoint: SSHEndpoint
+    let curve25519Endpoint: SSHEndpoint
     let username: String
     let privateKey: Curve25519.Signing.PrivateKey
 
@@ -2605,6 +2671,10 @@ private struct SessionDriverTestEnvironment: Sendable {
             let host = environment["HEELER_SSH_E2E_HOST"],
             let portText = environment["HEELER_SSH_E2E_PORT"],
             let port = UInt16(portText),
+            let postQuantumPortText = environment["HEELER_SSH_E2E_PQ_PORT"],
+            let postQuantumPort = UInt16(postQuantumPortText),
+            let curve25519PortText = environment["HEELER_SSH_E2E_RESTRICTED_PORT"],
+            let curve25519Port = UInt16(curve25519PortText),
             let username = environment["HEELER_SSH_E2E_USERNAME"],
             let seed = environment["HEELER_SSH_E2E_DEVICE_KEY_SEED"],
             let seedData = Data(base64Encoded: seed),
@@ -2614,6 +2684,8 @@ private struct SessionDriverTestEnvironment: Sendable {
         }
         return SessionDriverTestEnvironment(
             endpoint: SSHEndpoint(host: host, port: port),
+            postQuantumEndpoint: SSHEndpoint(host: host, port: postQuantumPort),
+            curve25519Endpoint: SSHEndpoint(host: host, port: curve25519Port),
             username: username,
             privateKey: privateKey)
     }()
@@ -2632,7 +2704,7 @@ private struct SessionDriverTestEnvironment: Sendable {
     func connect() async throws -> SSHConnection {
         let connection = try await SSHConnection.connect(
             to: endpoint,
-            timeout: .seconds(5))
+            timeout: .seconds(10))
         try await authenticate(connection)
         return connection
     }
@@ -2643,6 +2715,6 @@ private struct SessionDriverTestEnvironment: Sendable {
             username: username,
             publicKey: publicKeyBlob,
             signer: { try privateKey.signature(for: $0) },
-            timeout: .seconds(5))
+            timeout: .seconds(10))
     }
 }

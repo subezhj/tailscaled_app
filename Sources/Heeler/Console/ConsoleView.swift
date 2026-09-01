@@ -7,6 +7,7 @@ struct ConsoleView: View {
     let hosts: HostStore
     let console: ConsoleStore
     let terminal: TerminalSettings
+    let inputMode: AgentInputModeSettings
     let appearance: AppAppearanceSettings
     let pushRegistration: PushRegistrationStore
     let notificationPreferences: NotificationPreferencesStore
@@ -240,6 +241,7 @@ struct ConsoleView: View {
                     agent: agent,
                     console: console,
                     terminal: terminal,
+                    inputMode: inputMode,
                     hosts: hosts.enabledHosts,
                     activity: activity,
                     keyboardHandoff: keyboardHandoff,
@@ -249,6 +251,7 @@ struct ConsoleView: View {
                     // terminal on a spurious reappearance.
                     isOnStage: { [notificationRouter] in
                         notificationRouter.path.last == id
+                            && console.agents.contains(where: { $0.id == id })
                     },
                     onSwitch: { notificationRouter.path = [$0] },
                     onClosed: { notificationRouter.path = [] }

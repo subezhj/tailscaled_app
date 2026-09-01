@@ -29,6 +29,7 @@
         @State private var terminalFonts: TerminalFontSettings
         @State private var snippets: SnippetStore
         @State private var appearance: AppAppearanceSettings
+        @State private var inputMode: AgentInputModeSettings
         @State private var pushRegistration: PushRegistrationStore
         @State private var notificationPreferences: NotificationPreferencesStore
         @State private var relaySettings: NotificationRelaySettings
@@ -46,6 +47,7 @@
             _terminalFonts = State(initialValue: composition.terminalFonts)
             _snippets = State(initialValue: composition.snippets)
             _appearance = State(initialValue: composition.appearance)
+            _inputMode = State(initialValue: composition.inputMode)
             _pushRegistration = State(initialValue: composition.pushRegistration)
             _notificationPreferences = State(initialValue: composition.notificationPreferences)
             _relaySettings = State(initialValue: composition.relaySettings)
@@ -66,6 +68,7 @@
                 hosts: hosts,
                 console: console,
                 terminal: terminal,
+                inputMode: inputMode,
                 appearance: appearance,
                 pushRegistration: pushRegistration,
                 notificationPreferences: notificationPreferences,
@@ -95,6 +98,7 @@
         let terminalFonts: TerminalFontSettings
         let snippets: SnippetStore
         let appearance: AppAppearanceSettings
+        let inputMode: AgentInputModeSettings
         let pushRegistration: PushRegistrationStore
         let notificationPreferences: NotificationPreferencesStore
         let relaySettings: NotificationRelaySettings
@@ -121,6 +125,7 @@
                 terminalFonts: TerminalFontSettings(defaults: defaults),
                 snippets: SnippetStore(defaults: defaults),
                 appearance: AppAppearanceSettings(defaults: defaults),
+                inputMode: AgentInputModeSettings(defaults: defaults),
                 pushRegistration: pushRegistration,
                 notificationPreferences: notificationPreferences,
                 relaySettings: relaySettings,

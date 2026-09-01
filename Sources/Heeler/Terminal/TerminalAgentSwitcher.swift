@@ -3,7 +3,7 @@ import UIKit
 
 /// One chip in the keyboard's Agent switcher: the label it shows, the
 /// status its dot carries, and whether it is pinned.
-struct TerminalAgentSwitcherItem: Equatable, Sendable, Identifiable {
+struct TerminalAgentSwitcherItem: Equatable, Sendable {
     let id: ConsoleAgent.ID
     let title: String
     let status: AgentStatus
@@ -42,6 +42,11 @@ final class TerminalKeyboardHandoff {
 
     func arm(for id: ConsoleAgent.ID) {
         armedID = id
+    }
+
+    func cancel(for id: ConsoleAgent.ID) {
+        guard armedID == id else { return }
+        armedID = nil
     }
 
     /// Reads and clears the intent — a handoff is good for exactly one screen,
@@ -495,79 +500,17 @@ final class TerminalAgentChip: UIControl {
     }
 }
 
-/// The expanded Agent switcher: every Agent as a card in a grid, so a long
-/// list of terminals doesn't mean endless horizontal swiping in the chip
-/// strip. Presented as a sheet over the terminal; selecting an Agent dismisses
-/// and switches.
-struct AgentSwitcherPanel: View {
-    let switcher: TerminalAgentSwitcher
-    let onSelect: @MainActor (ConsoleAgent.ID) -> Void
-
-    private let columns = [
-        GridItem(.adaptive(minimum: 150), spacing: 12),
-    ]
-
-    var body: some View {
-        NavigationStack {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 12) {
-                    ForEach(switcher.items) { item in
-                        AgentSwitcherCard(item: item, isSelected: item.id == switcher.selectedID) {
-                            onSelect(item.id)
-                        }
-                    }
-                }
-                .padding(16)
-            }
-            .navigationTitle("Agents")
-            .navigationBarTitleDisplayMode(.inline)
-        }
-    }
-}
-
-/// One Agent card in the expanded switcher: status dot, title, selected ring.
-private struct AgentSwitcherCard: View {
-    let item: TerminalAgentSwitcherItem
-    let isSelected: Bool
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Circle()
-                        .fill(Color(uiColor: item.status.inkUIColor))
-                        .frame(width: 8, height: 8)
-                    if item.isPinned {
-                        Image(systemName: "pin.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer(minLength: 0)
-                }
-                Text(item.title)
-                    .font(.subheadline.weight(.medium))
-                    .lineLimit(2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                isSelected
-                    ? Color.accentColor.opacity(0.14)
-                    : Color(uiColor: .secondarySystemFill),
-                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .overlay {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .stroke(
-                        isSelected ? Color.accentColor : .clear,
-                        lineWidth: isSelected ? 2 : 0)
-            }
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(item.title)
-        .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
-    }
+/// Trailing control that enters or leaves Direct Input without living inside
+/// the chip scroller. Icon on compact width; segmented on regular width.
+enum TerminalAgentSwitcherModeControl {
+    case button(
+        systemImage: String,
+        accessibilityLabel: String,
+        accessibilityHint: String,
+        action: () -> Void)
+    case segmented(
+        selection: AgentInputMode,
+        select: (AgentInputMode) -> Void)
 }
 
 /// The resident Agent strip: the chips over their own fill, with the keyboard
@@ -579,11 +522,14 @@ struct TerminalAgentSwitcherRow: View {
     let toggleKeyboard: () -> Void
     var isToolsKeyboardPresented = false
     var switchKeyboard: (() -> Void)?
-    /// Opens the expanded Agent switcher panel.
-    var onExpand: (() -> Void)? = nil
-    /// Matches `UIPasteControl`'s fixed glyph size in the row below, or the
-    /// two read as icons borrowed from different sets.
+    /// Optional Hide Composer / Show Composer (or iPad Composer | Keyboard).
+    var modeControl: TerminalAgentSwitcherModeControl?
+    /// Matches `UIPasteControl`'s fixed glyph size in the row below. The
+    /// optically smaller Composer symbol is corrected at its call site.
     private static let glyphPointSize: CGFloat = 12
+    private static let composerGlyphPointSize: CGFloat = 14
+    private static let glyphSlotSize: CGFloat = 18
+    private static let groupedGlyphOffset: CGFloat = 2
     @Environment(\.displayScale) private var displayScale
 
     private var hairline: CGFloat { 1 / max(displayScale, 1) }
@@ -596,41 +542,27 @@ struct TerminalAgentSwitcherRow: View {
             Rectangle()
                 .fill(Color(uiColor: .separator))
                 .frame(width: hairline, height: 20)
+            if let modeControl {
+                modeControlView(modeControl)
+            }
             if isKeyboardUp, let switchKeyboard {
-                Button(action: switchKeyboard) {
-                    Image(
-                        systemName: isToolsKeyboardPresented
-                            ? "keyboard" : "wrench.and.screwdriver"
-                    )
-                        .font(.system(size: Self.glyphPointSize))
-                        .foregroundStyle(Color(uiColor: .label))
-                        .frame(width: 44, height: TerminalAgentSwitcherBar.preferredHeight)
-                        .contentTransition(.symbolEffect(.replace))
-                }
-                .accessibilityLabel(
-                    isToolsKeyboardPresented ? "Show iOS keyboard" : "Show tools keyboard")
+                trailingIconButton(
+                    systemImage: isToolsKeyboardPresented
+                        ? "keyboard" : "wrench.and.screwdriver",
+                    pointSize: Self.glyphPointSize,
+                    horizontalOffset: 0,
+                    accessibilityLabel: isToolsKeyboardPresented
+                        ? "Show iOS keyboard" : "Show tools keyboard",
+                    action: switchKeyboard)
             }
-            Button(action: toggleKeyboard) {
-                Image(
-                    systemName: isKeyboardUp
-                        ? "keyboard.chevron.compact.down" : "keyboard"
-                )
-                .font(.system(size: Self.glyphPointSize))
-                .foregroundStyle(Color(uiColor: .label))
-                .frame(width: 44, height: TerminalAgentSwitcherBar.preferredHeight)
-                .contentTransition(.symbolEffect(.replace))
-            }
-            .accessibilityLabel(isKeyboardUp ? "Dismiss keyboard" : "Show keyboard")
-            if let onExpand {
-                Button(action: onExpand) {
-                    Image(systemName: "chevron.up")
-                        .font(.system(size: Self.glyphPointSize, weight: .semibold))
-                        .foregroundStyle(Color(uiColor: .label))
-                        .frame(width: 44, height: TerminalAgentSwitcherBar.preferredHeight)
-                }
-                .accessibilityLabel("Show all Agents")
-                .padding(.trailing, 8)
-            }
+            trailingIconButton(
+                systemImage: isKeyboardUp
+                    ? "keyboard.chevron.compact.down" : "keyboard",
+                pointSize: Self.glyphPointSize,
+                horizontalOffset: -Self.groupedGlyphOffset,
+                accessibilityLabel: isKeyboardUp ? "Dismiss keyboard" : "Show keyboard",
+                action: toggleKeyboard)
+            .padding(.trailing, 8)
         }
         .frame(height: TerminalAgentSwitcherBar.preferredHeight)
         .background(alignment: .top) {
@@ -638,10 +570,65 @@ struct TerminalAgentSwitcherRow: View {
                 .fill(Color(uiColor: .separator))
                 .frame(height: hairline)
         }
-        // Transparent: the switcher sits inside the Composer's rounded
-        // material container, so a solid background here would paint a
-        // right-angle rectangle over the rounded corners.
-        .background(Color.clear)
+        .background(Color(uiColor: .secondarySystemBackground))
+    }
+
+    @ViewBuilder
+    private func modeControlView(_ control: TerminalAgentSwitcherModeControl) -> some View {
+        switch control {
+        case let .button(systemImage, accessibilityLabel, accessibilityHint, action):
+            trailingIconButton(
+                systemImage: systemImage,
+                pointSize: Self.composerGlyphPointSize,
+                horizontalOffset: Self.groupedGlyphOffset,
+                accessibilityLabel: accessibilityLabel,
+                accessibilityHint: accessibilityHint,
+                action: action)
+        case let .segmented(selection, select):
+            Picker("Input mode", selection: Binding(
+                get: { selection },
+                set: select)
+            ) {
+                ForEach(AgentInputMode.allCases) { mode in
+                    Text(mode.segmentTitle).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 184)
+            .padding(.horizontal, 4)
+            .accessibilityLabel("Input mode")
+        }
+    }
+
+    @ViewBuilder
+    private func trailingIconButton(
+        systemImage: String,
+        pointSize: CGFloat,
+        horizontalOffset: CGFloat,
+        accessibilityLabel: String,
+        accessibilityHint: String? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        let button = Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: pointSize))
+                .foregroundStyle(Color(uiColor: .label))
+                .frame(width: Self.glyphSlotSize, height: Self.glyphSlotSize)
+                .offset(x: horizontalOffset)
+                .frame(width: 44, height: TerminalAgentSwitcherBar.preferredHeight)
+                .contentTransition(.symbolEffect(.replace))
+        }
+        .buttonStyle(.plain)
+        .frame(width: 44, height: 44)
+        .contentShape(Rectangle())
+        .padding(.vertical, (TerminalAgentSwitcherBar.preferredHeight - 44) / 2)
+        .accessibilityLabel(accessibilityLabel)
+
+        if let accessibilityHint {
+            button.accessibilityHint(accessibilityHint)
+        } else {
+            button
+        }
     }
 
     private struct StripRepresentable: UIViewRepresentable {

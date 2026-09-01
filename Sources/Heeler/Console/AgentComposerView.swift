@@ -16,13 +16,6 @@ struct AgentComposerKeyboardLayout: Equatable {
     let contentInset: CGFloat
     let availableToolsHeight: CGFloat
 
-    /// How far the composer overlay must rise over the keyboard/tools dock.
-    /// Identical to `contentInset` today (the composer used to sit in a
-    /// safe-area inset driven by the same value); it exists so the floating
-    /// composer's caller can read why it is raising the bar without coupling
-    /// to the old inset's history.
-    var presentedContentInset: CGFloat { contentInset }
-
     init(
         currentHeight: CGFloat,
         lastPresentedHeight: CGFloat,
@@ -108,12 +101,16 @@ struct AgentComposerView: View {
     let skills: SkillsPaneStore?
     @Binding var keyboardPresentation: AgentComposerKeyboardPresentation
     let prepareKeyboardPresentation: (AgentComposerKeyboardPresentation) -> Void
+    /// Optional Hide Composer control on the switcher trail.
+    var modeControl: TerminalAgentSwitcherModeControl? = nil
+    var keyboardHandoffID: UUID?
+    var isKeyboardHandoffCurrent: (UUID) -> Bool = { _ in false }
+    var onFirstResponderRequest: (UUID, Bool) -> Void = { _, _ in }
+    var onKeyboardHandoffSettled: (UUID) -> Void = { _ in }
     @State private var isInputFocused = false
     /// An explicit dismissal hides suggestions for the current trigger token;
     /// removing the token arms them again.
     @State private var isSuggestionsDismissed = false
-    /// Whether the expanded Agent-switcher panel is showing.
-    @State private var isSwitcherExpanded = false
 
     private var isToolsKeyboardPresented: Bool {
         keyboardPresentation == .tools
@@ -122,15 +119,10 @@ struct AgentComposerView: View {
     var body: some View {
         VStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    statusLabel
-                    Spacer(minLength: 8)
-                    if let hostTelemetry {
-                        hostTelemetryLabel(hostTelemetry)
-                    }
-                }
-                .padding(.horizontal, 16)
-                .environment(\.colorScheme, chromeColorScheme)
+                AgentDetailStatusChrome(
+                    status: status,
+                    hostTelemetry: hostTelemetry,
+                    chromeColorScheme: chromeColorScheme)
 
                 VStack(spacing: 0) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -152,7 +144,11 @@ struct AgentComposerView: View {
                                     get: { store.draft },
                                     set: { store.replaceDraft(with: $0) }),
                                 isFocused: $isInputFocused,
-                                keyboardPresentation: keyboardPresentation)
+                                keyboardPresentation: keyboardPresentation,
+                                keyboardHandoffID: keyboardHandoffID,
+                                isKeyboardHandoffCurrent: isKeyboardHandoffCurrent,
+                                onFirstResponderRequest: onFirstResponderRequest,
+                                onKeyboardHandoffSettled: onKeyboardHandoffSettled)
                             if store.draft.isEmpty {
                                 Text("Message Agent")
                                     .foregroundStyle(.tertiary)
@@ -185,14 +181,9 @@ struct AgentComposerView: View {
 
                         HStack(spacing: 8) {
                             Menu {
-                                Button("Add Image", systemImage: "photo") {
-                                    actions.addImage()
-                                }
-                                .disabled(!actions.canBegin)
-                                Button("Add File", systemImage: "doc") {
-                                    actions.addFile()
-                                }
-                                .disabled(!actions.canBegin)
+                                AgentActionMenuContent(
+                                    actions: actions,
+                                    sections: AgentActionMenuPolicy.composerAddSections)
                             } label: {
                                 Image(systemName: "plus")
                                     .font(.system(size: 15, weight: .semibold))
@@ -206,51 +197,9 @@ struct AgentComposerView: View {
                             .accessibilityHint("Adds an image or file to the draft")
 
                             Menu {
-                                Section {
-                                    Button("Open Terminal", systemImage: "apple.terminal") {
-                                        actions.openTerminal?()
-                                    }
-                                    .disabled(
-                                        actions.openTerminal == nil
-                                            || actions.isOpeningTerminal
-                                    )
-                                    Button("New Agent", systemImage: "plus") {
-                                        actions.startAgent()
-                                    }
-                                    // Skills before Snippets: the Keys
-                                    // keyboard's tab order.
-                                    if let showSkills = actions.showSkills {
-                                        Button("Skills", systemImage: "sparkles") {
-                                            showSkills()
-                                        }
-                                    }
-                                    Button("Snippets", systemImage: "quote.bubble") {
-                                        actions.manageSnippets()
-                                    }
-                                }
-                                Section {
-                                    if let showWorktreeDetails = actions.showWorktreeDetails {
-                                        Button(
-                                            "Worktree Details",
-                                            systemImage: "arrow.triangle.branch"
-                                        ) {
-                                            showWorktreeDetails()
-                                        }
-                                    }
-                                    Button("Rename Agent", systemImage: "pencil") {
-                                        actions.renameAgent()
-                                    }
-                                    Button("Rename Workspace", systemImage: "pencil.line") {
-                                        actions.renameWorkspace()
-                                    }
-                                    Button(
-                                        "Close Agent",
-                                        systemImage: "trash",
-                                        role: .destructive
-                                    ) {
-                                        actions.closeAgent()
-                                    }
-                                }
+                                AgentActionMenuContent(
+                                    actions: actions,
+                                    sections: AgentActionMenuPolicy.composerMoreSections)
                             } label: {
                                 Image(systemName: "ellipsis")
                                     .font(.system(size: 17, weight: .semibold))
@@ -298,10 +247,10 @@ struct AgentComposerView: View {
                         toggleKeyboard: dismissOrPresentKeyboard,
                         isToolsKeyboardPresented: isToolsKeyboardPresented,
                         switchKeyboard: keyboardSwitchAction,
-                        onExpand: { isSwitcherExpanded = true })
+                        modeControl: modeControl)
                 }
                 .background(
-                    Color(uiColor: .secondarySystemBackground),
+                    .regularMaterial,
                     in: RoundedRectangle(cornerRadius: 24, style: .continuous)
                 )
                 .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
@@ -339,24 +288,6 @@ struct AgentComposerView: View {
                 // then reuse (the ConsoleStore caches underneath).
                 Task { await skills.loadIfNeeded() }
             }
-        }
-        // The expanded Agent switcher: a grid of every Agent, so a long list
-        // of terminals doesn't require endless horizontal swiping in the chip
-        // strip. Presenting as a sheet keeps the composer and keyboard state
-        // intact underneath.
-        .sheet(isPresented: $isSwitcherExpanded) {
-            AgentSwitcherPanel(
-                switcher: focusPreservingSwitcher,
-                onSelect: { id in
-                    isSwitcherExpanded = false
-                    if isInputFocused {
-                        keyboardHandoff.arm(for: id)
-                    }
-                    switcher.onSelect(id)
-                })
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.visible)
-            .presentationBackground(.regularMaterial)
         }
     }
 
@@ -452,44 +383,6 @@ struct AgentComposerView: View {
         Color(uiColor: .label).opacity(0.72)
     }
 
-    private var statusLabel: some View {
-        HStack(spacing: 4) {
-            if status == .working {
-                SolvingOrbView(size: 10)
-                    .accessibilityHidden(true)
-            } else {
-                Circle()
-                    .fill(Color(status.inkUIColor))
-                    .frame(width: 7, height: 7)
-                    .accessibilityHidden(true)
-            }
-            Text(status.rawValue.capitalized)
-        }
-        .font(.caption2.weight(.medium))
-        .foregroundStyle(Color(status.inkUIColor))
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Agent status")
-        .accessibilityValue(status.rawValue.capitalized)
-    }
-
-    /// Deliberately quieter than Agent Status: it never changes color with the
-    /// value and never animates, so a number that moves on its own cadence
-    /// cannot pull attention away from the Agent the user came here for.
-    private func hostTelemetryLabel(
-        _ telemetry: HostTelemetryPresentation
-    ) -> some View {
-        Text(telemetry.title)
-            .font(.caption2)
-            .monospacedDigit()
-            // One step brighter on dark themes: tertiary gray recedes into a
-            // near-black surface faster than it does into a light one.
-            .foregroundStyle(
-                chromeColorScheme == .dark
-                    ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(telemetry.accessibilityLabel)
-            .accessibilityValue(telemetry.accessibilityValue)
-    }
 }
 
 /// The inline suggestion menu above the Composer's text area: the Skills the
@@ -643,6 +536,10 @@ private struct AgentComposerTextEditor: UIViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
     let keyboardPresentation: AgentComposerKeyboardPresentation
+    let keyboardHandoffID: UUID?
+    let isKeyboardHandoffCurrent: (UUID) -> Bool
+    let onFirstResponderRequest: (UUID, Bool) -> Void
+    let onKeyboardHandoffSettled: (UUID) -> Void
 
     func makeCoordinator() -> Coordinator {
         Coordinator(text: $text, isFocused: $isFocused)
@@ -657,6 +554,7 @@ private struct AgentComposerTextEditor: UIViewRepresentable {
         textView.textContainerInset = UIEdgeInsets(top: 8, left: 0, bottom: 8, right: 0)
         textView.textContainer.lineFragmentPadding = 0
         textView.accessibilityLabel = "Message the Agent"
+        textView.onKeyboardHandoffSettled = onKeyboardHandoffSettled
         return textView
     }
 
@@ -665,14 +563,27 @@ private struct AgentComposerTextEditor: UIViewRepresentable {
             textView.text = text
         }
         textView.updateKeyboard(presentation: keyboardPresentation)
+        textView.onKeyboardHandoffSettled = onKeyboardHandoffSettled
         let shouldFocus = isFocused
         guard shouldFocus != textView.isFirstResponder else { return }
         DispatchQueue.main.async { [weak textView] in
             guard let textView else { return }
             if shouldFocus {
-                textView.becomeFirstResponder()
+                if let keyboardHandoffID {
+                    guard textView.window != nil,
+                          isKeyboardHandoffCurrent(keyboardHandoffID)
+                    else {
+                        onFirstResponderRequest(keyboardHandoffID, false)
+                        return
+                    }
+                    onFirstResponderRequest(
+                        keyboardHandoffID,
+                        textView.requestKeyboardHandoff(id: keyboardHandoffID))
+                } else {
+                    textView.becomeFirstResponder()
+                }
             } else {
-                textView.resignFirstResponder()
+                _ = textView.resignFirstResponder()
             }
         }
     }
@@ -727,6 +638,58 @@ private struct AgentComposerTextEditor: UIViewRepresentable {
 final class AgentComposerUITextView: UITextView {
     private lazy var suppressedSoftKeyboard = TerminalSuppressedSoftKeyboardView()
     private var keyboardPresentation: AgentComposerKeyboardPresentation = .hidden
+    var onKeyboardHandoffSettled: ((UUID) -> Void)?
+    private var activeKeyboardHandoffID: UUID?
+
+    override init(frame: CGRect, textContainer: NSTextContainer?) {
+        super.init(frame: frame, textContainer: textContainer)
+        installKeyboardObservers()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        installKeyboardObservers()
+    }
+
+    private func installKeyboardObservers() {
+        for name: Notification.Name in [
+            UIResponder.keyboardDidShowNotification,
+            UIResponder.keyboardDidChangeFrameNotification,
+        ] {
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(keyboardFrameDidSettle(_:)),
+                name: name,
+                object: nil)
+        }
+    }
+
+    @objc private func keyboardFrameDidSettle(_ notification: Notification) {
+        guard isFirstResponder, let window, window.isKeyWindow,
+              let endFrame = notification.userInfo?[UIResponder.keyboardFrameEndUserInfoKey]
+                as? CGRect
+        else { return }
+        let frameInWindow = window.convert(endFrame, from: window.screen.coordinateSpace)
+        guard TerminalKeyboardInset.keyboardFrame(
+            frameInWindow,
+            matches: window.keyboardLayoutGuide.layoutFrame,
+            in: window)
+        else { return }
+        guard let activeKeyboardHandoffID else { return }
+        self.activeKeyboardHandoffID = nil
+        onKeyboardHandoffSettled?(activeKeyboardHandoffID)
+    }
+
+    @discardableResult
+    func requestKeyboardHandoff(id: UUID) -> Bool {
+        guard window != nil else { return false }
+        activeKeyboardHandoffID = id
+        let accepted = becomeFirstResponder()
+        if !accepted {
+            activeKeyboardHandoffID = nil
+        }
+        return accepted
+    }
 
     func updateKeyboard(presentation: AgentComposerKeyboardPresentation) {
         guard presentation != keyboardPresentation else { return }
@@ -816,20 +779,7 @@ struct AgentToolsKeyboard: View {
             .padding(.vertical, 2)
         }
         .frame(height: height)
-        // iOS-keyboard-style top rounded corners: the tools dock replaces the
-        // system keyboard, so it should read as a rounded surface sitting over
-        // the terminal, not a raw right-angle rectangle. Matches the composer
-        // bar's secondarySystemBackground so the whole bottom chrome reads as
-        // one surface (systemBackground is pure black in dark mode and looked
-        // like a jarring black bar).
-        .background(
-            Color(uiColor: .secondarySystemBackground),
-            in: UnevenRoundedRectangle(
-                topLeadingRadius: 20,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: 0,
-                topTrailingRadius: 20))
-        .ignoresSafeArea(edges: .bottom)
+        .background(Color(uiColor: .systemBackground).ignoresSafeArea(edges: .bottom))
         .onChange(of: selectedTab) { _, tab in
             guard tab == .skills, let skills = context.skills else { return }
             Task { await skills.store.loadIfNeeded() }

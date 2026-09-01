@@ -7,6 +7,48 @@ Entries reference the issue that motivated them.
 
 ## [Unreleased]
 
+### Fixed
+
+- New Agent now detects supported Agent CLIs from the Host's standard
+  user-local, Bun, Cargo, Homebrew, and Linuxbrew install paths over SSH.
+  (#254)
+
+## [0.1.4] - 2026-09-01
+
+### Changed
+
+- Agent alerts consistently identify Agents by workspace plus friendly kind.
+  Live Activities use compact aligned rows with a colored status dot beside the
+  workspace and the friendly kind underneath, without terminal-title,
+  custom-name, workdir, or special Blocked-row background noise. (#260)
+
+- Agent cards consistently lead with the herdr workspace or Agent identity,
+  followed by the launch directory and a shared Agent-type and Host line;
+  terminal-generated titles and TUI metadata no longer compete with that
+  hierarchy. (#259)
+
+- When no size has been saved, Terminal Text Size now defaults to 8 pt instead
+  of 14 pt. Existing saved sizes do not change. (#256; PR #257)
+
+### Added
+
+- HeelerSSH connections negotiate post-quantum hybrid key exchange
+  (`mlkem768x25519-sha256`) against servers that offer it, via a libssh2
+  snapshot that carries upstream ML-KEM support; servers without it keep
+  using `curve25519-sha256`. (#261)
+
+- Agent detail now offers Direct Input, which hides the Composer and routes iOS
+  keyboard input directly to the live Attach PTY. A persistent row above the
+  Agent switcher provides Esc, Tab, Shift-Tab, arrow keys, Backspace,
+  Shift-Enter, and Enter; keyboard show/hide controls remain in the switcher.
+  Composer remains the default. Switching modes preserves the draft and keeps
+  a visible iOS keyboard in place. (#251; PR #253)
+
+### Fixed
+
+- Attach terminals begin restoring as soon as a reconnected Host's Transport
+  is ready, without waiting for event subscription and snapshot recovery. (#264; PR #265)
+
 ## [0.1.3] - 2026-08-28
 
 ### Changed

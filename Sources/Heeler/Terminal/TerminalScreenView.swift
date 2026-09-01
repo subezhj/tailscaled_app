@@ -1061,14 +1061,19 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
         let rowCount = abs(rows)
 
         // Alternate-screen (herdr TUI): ghostty's local scrollback is empty,
-        // so `scroll_page_lines` would do nothing, and remote scroll
-        // sequences cost a network RTT per gesture. When the owner provides
-        // a history hook, scrolling toward older content presents a
-        // `pane.read`-fed overlay that scrolls locally — one fetch per
-        // screenful instead of one RTT per tick. Throttled to once per
-        // gesture so every tick of the pan gesture doesn't fire it.
-        if modeTracker.isAlternateScreen, towardOlderContent,
-            !historyRequestedThisGesture, onHistoryRequested != nil
+        // so `scroll_page_lines` would do nothing — the mode where the user
+        // enables Local Scrolling only to find scrolling frozen. Only in
+        // that mode does scrolling toward older content present the
+        // `pane.read`-fed history overlay instead (one fetch per screenful
+        // instead of one RTT per tick). With Local Scrolling off (default)
+        // the ordinary remote-scroll path below is kept intact — nothing is
+        // intercepted and no sheet is presented.
+        // Requires a minimum of 3 rows to avoid triggering on light flicks
+        // the user intended as taps.
+        if TerminalLocalScrollSettings.isEnabled(),
+            modeTracker.isAlternateScreen, towardOlderContent,
+            rowCount >= 3, !historyRequestedThisGesture,
+            onHistoryRequested != nil
         {
             historyRequestedThisGesture = true
             onHistoryRequested?()

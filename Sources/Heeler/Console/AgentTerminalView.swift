@@ -494,20 +494,20 @@ struct AgentTerminalView: View {
             // replacement, so the new surface lands at its final size.
             .animation(nil, value: attach.terminalID)
         .overlay { statusOverlay }
-        // The composer floats over the terminal instead of insetting it. The
-        // system keyboard never shrinks the terminal's grid: a keyboard is an
-        // overlay that covers the bottom rows, not a window resize. Keeping
-        // the grid's rows constant means no PTY resize rides the keyboard
-        // show/hide — which herdr would broadcast to every client attached
-        // to the same pane, including a desktop herdr TUI on the same host
-        // (#127: the PC side shrank to the phone's rows on every keystroke).
+        // The composer sits in a bottom safe-area inset so the terminal grid
+        // ends above the input bar — the TUI's last row (Idle/Working) is
+        // fully visible, not covered by an overlay. The system keyboard
+        // never shrinks the terminal's grid: the keyboard is an overlay that
+        // covers the bottom rows, not a window resize. Keeping the grid's
+        // rows constant means no PTY resize rides the keyboard show/hide —
+        // which herdr would broadcast to every client attached to the same
+        // pane, including a desktop herdr TUI on the same host (#127).
+        //
         // The composer itself is raised by the keyboard's own inset below,
-        // so it always sits on the keyboard's top edge. Placed before the
-        // staging bar so the bar (z-above) stays visible over the composer.
-        .overlay(alignment: .bottom) {
-            // The staging bar (upload/paste status) rides above the composer;
-            // both rise together with the keyboard so the bar's Cancel/Retry
-            // actions stay reachable while typing.
+        // so it always sits on the keyboard's top edge. The staging bar
+        // (upload/paste status) rides above the composer; both rise together
+        // so the bar's Cancel/Retry actions stay reachable while typing.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 attachmentStatus
                 AgentComposerView(

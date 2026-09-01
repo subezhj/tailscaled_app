@@ -83,19 +83,32 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Generate Xcode project
-        run: xcodegen generate
-
-      # Read the version from project.yml so artifact names carry it.
+      # Read the MARKETING_VERSION from project.yml. The BUILD number is the
+      # workflow run_number, which auto-increments on every trigger — so each
+      # build has a unique ID both in the artifact name and in the app's
+      # CFBundleVersion (CURRENT_PROJECT_VERSION is patched below before the
+      # Xcode project is regenerated).
       - name: Read version
         id: version
         run: |
           MARKETING=$(awk -F'"' '/MARKETING_VERSION/ {print $2; exit}' project.yml)
-          BUILD=$(awk -F'"' '/CURRENT_PROJECT_VERSION/ {print $2; exit}' project.yml)
           echo "marketing=${MARKETING:-0.0.0}" >> "$GITHUB_OUTPUT"
-          echo "build=${BUILD:-0}" >> "$GITHUB_OUTPUT"
-          # A filename-safe version: MARKETING-BUILD, no spaces or parens.
-          echo "fileversion=${MARKETING:-0.0.0}-${BUILD:-0}" >> "$GITHUB_OUTPUT"
+          echo "runnumber=${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+          # Filename-safe version: Heeler-IPA-v0.1.3-b42.ipa
+          echo "artifact_version=${MARKETING:-0.0.0}-b${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+
+      # Patch the source-level build number so the app's About screen and
+      # the IPA metadata carry the same incremented ID. Must run BEFORE
+      # xcodegen generate so the regenerated project picks it up.
+      - name: Patch CURRENT_PROJECT_VERSION
+        run: |
+          sed -i '' \
+            "s/CURRENT_PROJECT_VERSION: \"[0-9]*\"/CURRENT_PROJECT_VERSION: \"${{ github.run_number }}\"/" \
+            project.yml
+          awk '/CURRENT_PROJECT_VERSION/' project.yml
+
+      - name: Generate Xcode project
+        run: xcodegen generate
 
       # ---- Archive ----
       - name: Archive (unsigned)
@@ -150,9 +163,9 @@ jobs:
           # unsigned .app into an .ipa that sideload tools accept.
           mkdir -p build/ipa/Payload
           cp -R build/Heeler.xcarchive/Products/Applications/Heeler.app build/ipa/Payload/
-          cd build/ipa && zip -qry ../Heeler-unsigned.ipa Payload
+          cd build/ipa && zip -qry "../Heeler-IPA-v${{ steps.version.outputs.artifact_version }}.ipa" Payload
           cd ../..
-          ls -la build/Heeler-unsigned.ipa
+          ls -la build/Heeler-IPA-v*.ipa
 
       - name: Export IPA (development signed)
         if: github.event.inputs.signing == 'development'
@@ -176,38 +189,12 @@ jobs:
             -exportOptionsPlist build/ExportOptions.plist \
             -exportPath build/ipa \
             -allowProvisioningUpdates
-          mv build/ipa/Heeler.ipa build/Heeler-signed.ipa 2>/dev/null || true
+          mv build/ipa/Heeler.ipa "build/Heeler-IPA-v${{ steps.version.outputs.artifact_version }}.ipa" 2>/dev/null || true
 
-      - name: Package zip (IPA only, no source)
-        run: |
-          rm -rf build/dist
-          mkdir -p build/dist
-          VERSION="${{ steps.version.outputs.fileversion }}"
-          SIGN="${{ github.event.inputs.signing || 'unsigned' }}"
-          # Exactly one ipa per build, named with the version and signing mode.
-          if [ "$SIGN" = "development" ]; then
-            SRC=build/Heeler-signed.ipa
-            DST="build/dist/Heeler-${VERSION}-signed.ipa"
-          else
-            SRC=build/Heeler-unsigned.ipa
-            DST="build/dist/Heeler-${VERSION}-unsigned.ipa"
-          fi
-          if [ ! -f "$SRC" ]; then
-            echo "::error::$SRC not found"
-            exit 1
-          fi
-          cp "$SRC" "$DST"
-          cd build/dist
-          zip -qry "../Heeler-${VERSION}-${SIGN}.zip" "$(basename "$DST")"
-          cd ../..
-          echo "=== zip contents ==="
-          unzip -l "build/Heeler-${VERSION}-${SIGN}.zip"
-          ls -la build/dist build/Heeler-*.zip
-
-      - name: Upload IPA zip artifact
+      - name: Upload IPA artifact
         uses: actions/upload-artifact@v4
         with:
           name: Heeler-IPA
-          path: build/Heeler-*.zip
+          path: build/Heeler-IPA-v*.ipa
           if-no-files-found: error
           retention-days: 30

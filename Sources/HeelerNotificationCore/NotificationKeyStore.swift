@@ -47,13 +47,24 @@ struct NotificationKeyStore: Sendable {
     private let mirror: NotificationKeyMirror?
 
     init(
-        secrets: any SecretStore = KeychainSecretStore(
-            service: NotificationKeyStore.service,
-            accessGroup: NotificationKeyStore.sharedAccessGroup),
+        secrets: (any SecretStore)? = nil,
         mirror: NotificationKeyMirror? = NotificationKeyMirror()
     ) {
-        self.secrets = secrets
-        self.mirror = mirror
+        // The App Group entitlement is present iff iOS hands us the shared
+        // container. When it is (properly signed builds) the keychain store
+        // uses the shared access group and mirroring is enabled. When it is
+        // missing (unsigned/side-loaded builds) we degrade to a
+        // process-private keychain — the registration flow still works, and
+        // only the Notification Service Extension loses read access.
+        let shared = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: Self.sharedAccessGroup) != nil
+        let store: any SecretStore =
+            secrets
+            ?? KeychainSecretStore(
+                service: Self.service,
+                accessGroup: shared ? Self.sharedAccessGroup : nil)
+        self.secrets = store
+        self.mirror = shared ? mirror : nil
     }
 
     /// A fresh random Notification Key, generated on device per the contract.

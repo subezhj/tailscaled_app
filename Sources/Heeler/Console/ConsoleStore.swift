@@ -194,6 +194,21 @@ final class ConsoleStore {
         }
     }
 
+    /// Forces a fresh activation for every Host that is not currently
+    /// `.connected`. This is the tailnet-ready recovery: when the embedded
+    /// node reaches Running and the SOCKS5 proxy is injected, Hosts whose
+    /// cold-start dial failed *before* the proxy existed are still sitting in
+    /// `.connecting`/`.reconnecting`/`.failed` — `revalidate()` only restarts
+    /// `.failed` ones, so without this the user has to tap Reconnect.
+    /// Connected Hosts (LAN, already-up tailnet) are left alone.
+    func retryNonConnectedHosts() async {
+        for projection in projections.values
+        where projection.status != .connected
+        {
+            await projection.retry()
+        }
+    }
+
     /// Restarts one Host without disturbing other Hosts that may be connected,
     /// reconnecting, or waiting for their own repair.
     func retryHost(_ id: Host.ID) async {

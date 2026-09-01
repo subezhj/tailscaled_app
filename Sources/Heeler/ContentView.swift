@@ -138,16 +138,19 @@ struct ContentView: View {
             console.setHosts(hostStore.enabledHosts)
             notificationPreferences.setHosts(hostStore.hosts)
         }
-        // When the tailnet node reaches Running (proxy injected), re-activate
-        // the console so tailnet Hosts that failed a cold-start attempt
-        // (because the proxy wasn't ready yet) connect automatically instead
-        // of waiting for a manual reconnect.
+        // When the tailnet node reaches Running (proxy injected), retry every
+        // Host that is not yet connected — their cold-start dial failed
+        // because the proxy wasn't injected yet. `reactivate()` would only
+        // restart `.failed` Hosts; Hosts stuck in `.connecting` or
+        // `.reconnecting` just get a ping. `retryNonConnectedHosts()` forces
+        // a fresh activation for all of them, which is the correct recovery
+        // when the proxy just became available.
         // `initial: true` ensures this fires even when the node was already
         // Running before the observer attached (fast restore on a logged-in
         // node with ephemeral: false).
         .onChange(of: tailnet.isVerified, initial: true) { _, verified in
             if verified {
-                Task { await console.reactivate() }
+                Task { await console.retryNonConnectedHosts() }
             }
         }
         // Feeds the Console's Agent list to the router — so a notification

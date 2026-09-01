@@ -238,7 +238,10 @@ struct HostOnboardingView: View {
                             }
                         }
                     }
-                    .disabled(isSelected(session) || (!session.isDefault && !session.isRunning))
+                    // Stopped named sessions are selectable; the selection
+                    // is saved to the Host config and herdr starts the
+                    // session on the next connection.
+                    .disabled(isSelected(session))
                 }
                 if let error = store.sessionDiscoveryError {
                     Label(error, systemImage: "exclamationmark.triangle")

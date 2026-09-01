@@ -173,6 +173,7 @@ struct HostListView: View {
                                     .tint(.orange)
                                 }
                             }
+                        }
                     }
                 }
             }

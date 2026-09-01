@@ -329,9 +329,6 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
     /// signal can fail to arrive. Tests stretch it so a loaded runner cannot
     /// end a handoff out from under them (#225).
     var keyboardTransitionFallbackDelay: TimeInterval = 0.5
-    /// Tracks whether the current pan gesture has already fired
-    /// `onHistoryRequested`. Reset on every gesture start.
-    private var historyRequestedThisGesture = false
     private var keyboardGridReportTask: Task<Void, Never>?
     /// How long Ghostty gets to answer a settled layout before its grid is
     /// forwarded to the Host — long enough to coalesce one layout pass's
@@ -1060,26 +1057,6 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
         let towardOlderContent = rows > 0
         let rowCount = abs(rows)
 
-        // Alternate-screen (herdr TUI): ghostty's local scrollback is empty,
-        // so `scroll_page_lines` would do nothing — the mode where the user
-        // enables Local Scrolling only to find scrolling frozen. Only in
-        // that mode does scrolling toward older content present the
-        // `pane.read`-fed history overlay instead (one fetch per screenful
-        // instead of one RTT per tick). With Local Scrolling off (default)
-        // the ordinary remote-scroll path below is kept intact — nothing is
-        // intercepted and no sheet is presented.
-        // Requires a minimum of 3 rows to avoid triggering on light flicks
-        // the user intended as taps.
-        if TerminalLocalScrollSettings.isEnabled(),
-            modeTracker.isAlternateScreen, towardOlderContent,
-            rowCount >= 3, !historyRequestedThisGesture,
-            onHistoryRequested != nil
-        {
-            historyRequestedThisGesture = true
-            onHistoryRequested?()
-            return rows
-        }
-
         // Local-scroll preference: skip the remote round-trip entirely and
         // page ghostty's own buffer. Instant, but in alternate-screen mode
         // ghostty may have little scrollback to show. Off (default) sends
@@ -1230,7 +1207,6 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
         case .began:
             stopTouchScrollMomentum()
             touchScrollAccumulator.reset()
-            historyRequestedThisGesture = false
         case .changed:
             _ = scrollTouch(translationY: gesture.translation(in: self).y)
             gesture.setTranslation(.zero, in: self)

@@ -38,4 +38,4 @@ __pycache__/
 .claude/
 CODE_LOOP.md
 code_perf.md
-Heeler-IPA-merge-a0f7a30.ipa
+*.ipa

@@ -52,6 +52,12 @@ struct ConsoleView: View {
     @State private var keyboardInset = TerminalKeyboardInset()
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// A Host that just went `.failed` while a system VPN (LOON, Surge, …)
+    /// is active. Non-nil once per failed Host: the alert is presented once,
+    /// and clearing it (acknowledge or retry) re-arms it for the next
+    /// transition so the user is not nagged repeatedly.
+    @State private var vpnBlockedHostID: Host.ID?
+    @State private var vpnAlertAcknowledged: Set<Host.ID> = []
 
     var body: some View {
         // A split view instead of a plain stack for the iPad's sake: regular
@@ -203,6 +209,72 @@ struct ConsoleView: View {
                 self.hostFilter = nil
             }
         }
+        // When a tailnet Host fails while a system VPN is running, surface
+        // the likely cause once (per Host) and offer a retry: the user may
+        // have a proxy app (LOON, Surge…) whose tunnel is absorbing the
+        // tailnet control/DERP traffic. Closing the VPN and tapping Retry
+        // re-dials without restarting the app.
+        .onChange(of: console.hostStatuses, initial: true) { _, statuses in
+            for host in hosts.enabledHosts {
+                // Re-arm the prompt once the Host recovers: a later failure
+                // episode may have a different cause worth flagging.
+                if !Self.isFailed(statuses[host.id]) {
+                    vpnAlertAcknowledged.remove(host.id)
+                    continue
+                }
+                guard SystemVPNStatus.isActive() else { continue }
+                guard Self.isTailnetAddress(host.address) else { continue }
+                guard !vpnAlertAcknowledged.contains(host.id) else { continue }
+                vpnBlockedHostID = host.id
+                break
+            }
+        }
+        .alert(
+            "VPN Interfering with Tailnet",
+            isPresented: Binding(
+                get: { vpnBlockedHostID != nil },
+                set: { if !$0 { vpnBlockedHostID = nil } }
+            )
+        ) {
+            Button("Retry Connection") {
+                if let id = vpnBlockedHostID {
+                    vpnAlertAcknowledged.insert(id)
+                    Task { await reconnectHost(id) }
+                }
+                vpnBlockedHostID = nil
+            }
+            Button("Close VPN First", role: .cancel) {
+                if let id = vpnBlockedHostID {
+                    vpnAlertAcknowledged.insert(id)
+                }
+                vpnBlockedHostID = nil
+            }
+        } message: {
+            Text(
+                "A system VPN is active. It can block the Tailscale tunnel "
+                    + "this Host connects through. Turn the VPN off, then "
+                    + "retry the connection.")
+        }
+    }
+
+    /// Mirrors `HeelerSSH.TailnetTarget.isTailnet` for the app layer (that
+    /// helper is internal to the package): 100.x tailnet addresses, MagicDNS
+    /// `*.ts.net` names, and fd7a:/48 tailnet IPv6.
+    private static func isTailnetAddress(_ address: String) -> Bool {
+        if address.hasSuffix(".ts.net") { return true }
+        let parts = address.split(separator: ".")
+        if parts.count == 4,
+            let a = UInt8(parts[0]),
+            let b = UInt8(parts[1])
+        {
+            return a == 100 && (64...127).contains(b)
+        }
+        return address.lowercased().hasPrefix("fd7a:115c:a1e0")
+    }
+
+    private static func isFailed(_ status: EventsSessionStatus?) -> Bool {
+        guard let status, case .failed = status else { return false }
+        return true
     }
 
     /// The sidebar selection as a projection of the router's path. Setting

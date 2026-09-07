@@ -203,6 +203,14 @@ struct ContentView: View {
                 // on another; re-dial the tailnet node if the interface
                 // changed while we were backgrounded.
                 tailnet.networkMayHaveChanged()
+                // The VPN-interference prompt tells the user to close a proxy
+                // app (LOON, Surge…) that is absorbing tailnet traffic and
+                // retry without restarting Heeler. When they return from
+                // Settings with the VPN actually gone, re-dial every Host
+                // that is not connected — no app restart needed.
+                if !SystemVPNStatus.isActive() {
+                    Task { await console.retryNonConnectedHosts() }
+                }
                 // Re-probes notification permission on every return, grace
                 // period or not: the user may have flipped it in the
                 // Settings app while we were backgrounded.

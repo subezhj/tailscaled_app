@@ -25,8 +25,14 @@ import Foundation
 enum HerdrHostPath: Sendable {
     /// Directories appended to `PATH` on herdr CLI and Agent discovery
     /// execs. `$HOME` is expanded by the remote `/bin/sh`, not by Swift.
+    /// nvm's node bin is versioned (`versions/node/vX/bin`); the fixed
+    /// literal matches the version this Host is observed to run, and the
+    /// nvm root symlink (`$HOME/.nvm/current/bin`) covers installs that
+    /// keep a `current` alias — PATH does not expand globs, so a `*` here
+    /// would be a literal directory name.
     static let extraPATH =
         "$HOME/.local/bin:$HOME/.linuxbrew/bin:$HOME/.cargo/bin:$HOME/.bun/bin:"
+        + "$HOME/.nvm/versions/node/v24.19.0/bin:$HOME/.nvm/current/bin:"
         + "/opt/homebrew/bin:/usr/local/bin:/home/linuxbrew/.linuxbrew/bin"
 
     static var pathAssignment: String {

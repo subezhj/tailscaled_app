@@ -285,6 +285,22 @@ final class TailnetNodeController: ObservableObject {
         handleNetworkChange(to: current)
     }
 
+    /// Forces a control-plane/DERP re-dial on foreground return regardless of
+    /// interface change. The audio keepalive keeps this process alive through
+    /// a background stay, but iOS still restricts background networking: the
+    /// node's sessions go stale on the same interface (no NWPathMonitor
+    /// transition to catch), so returning finds the SOCKS5 proxy resolving
+    /// nothing. `node.up()` is idempotent and cheap on a live node, so this
+    /// is safe to call on every `.active` — it re-establishes the tailnet
+    /// when it went stale and is a no-op when it did not.
+    func restoreOnForeground() {
+        guard let node, isVerified else { return }
+        logger.log("Tailnet: foreground return; re-dialing control plane + DERP")
+        Task {
+            try? await node.up()
+        }
+    }
+
     /// Starts interactive login. `startLoginInteractive()` makes the node
     /// emit `BrowseToURL` on the IPN bus; the view presents that URL.
     /// If the node is still wiring up (localAPI not yet ready), waits a

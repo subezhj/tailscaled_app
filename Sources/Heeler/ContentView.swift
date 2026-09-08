@@ -201,16 +201,24 @@ struct ContentView: View {
                 audioKeeper.didBecomeActive()
                 // The app may have been suspended on one network and resumed
                 // on another; re-dial the tailnet node if the interface
-                // changed while we were backgrounded.
+                // changed while we were backgrounded. With the audio keepalive
+                // the process survives a background stay even with no
+                // interface change, so also force a control-plane/DERP re-dial
+                // unconditionally — iOS restricts background networking and
+                // leaves the node's sessions stale.
                 tailnet.networkMayHaveChanged()
-                // The VPN-interference prompt tells the user to close a proxy
-                // app (LOON, Surge…) that is absorbing tailnet traffic and
-                // retry without restarting Heeler. When they return from
-                // Settings with the VPN actually gone, re-dial every Host
-                // that is not connected — no app restart needed.
-                if !SystemVPNStatus.isActive() {
-                    Task { await console.retryNonConnectedHosts() }
-                }
+                tailnet.restoreOnForeground()
+                // Recover Host connections after a background stay. With the
+                // audio keepalive the process survives the background, but
+                // iOS still restricts background networking: the tailnet
+                // node's control/DERP sessions go stale and the SOCKS5 proxy
+                // stops resolving, so a foreground return finds every Host
+                // reconnecting or failed. `reactivate()` only `resume()`s
+                // (a no-op for those states), so force a fresh activation
+                // for every non-connected Host. Unconditional: a running VPN
+                // (LOON, Surge…) is the *cause* to report, not a reason to
+                // skip recovery.
+                Task { await console.retryNonConnectedHosts() }
                 // Re-probes notification permission on every return, grace
                 // period or not: the user may have flipped it in the
                 // Settings app while we were backgrounded.

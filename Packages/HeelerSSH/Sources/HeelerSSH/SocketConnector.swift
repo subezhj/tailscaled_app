@@ -101,12 +101,16 @@ public enum SocketConnector {
             lastDialReport = DialReport(
                 host: endpoint.host, port: endpoint.port,
                 viaProxy: viaProxy, failed: true)
-            // A proxy dial failure means the embedded node's loopback proxy
-            // is dead or its tailnet is stale — the SSH layer cannot repair
-            // it, and every retry would dial the same dead proxy. Nudge the
-            // owner to rebuild the node so the next attempt gets a fresh
-            // proxy. Direct dials never take this path.
-            if viaProxy {
+            // A failure dialing a tailnet destination means the embedded
+            // node's side of the path is broken — either the loopback proxy
+            // is stale (control/DERP sessions died in a background stay) or
+            // the proxy is not set at all because the node is not verified,
+            // in which case this dial went direct into the CGNAT range with
+            // no iOS route and failed with connectionFailed. The SSH layer
+            // cannot repair either; notify the owner to start/rebuild the
+            // node so the next attempt gets a working proxy. Direct dials to
+            // non-tailnet hosts never take this path.
+            if isTailnet {
                 onProxyDialFailure?()
             }
             throw error

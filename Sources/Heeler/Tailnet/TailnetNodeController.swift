@@ -52,6 +52,8 @@ final class TailnetNodeController: ObservableObject {
     private var localAPI: LocalAPIClient?
     private var processor: MessageProcessor?
     private let logger = TailnetLogger()
+    /// When the last proxy-failure rebuild happened, for throttling.
+    private var lastProxyRebuildAt: ContinuousClock.Instant?
 
     /// Watches for network path changes (WiFi↔cellular). iOS tears down every
     /// existing connection on such a switch, including the node's control/DERP
@@ -95,6 +97,7 @@ final class TailnetNodeController: ObservableObject {
             let node = try TailscaleNode(config: config, logger: logger)
             self.node = node
             startPathMonitor()
+            installProxyFailureRebuild()
             Task { [weak self] in
                 await self?.wireUp(node: node)
             }
@@ -102,6 +105,50 @@ final class TailnetNodeController: ObservableObject {
             state = .failed(error.localizedDescription)
         }
     }
+
+    /// Registers the SSH-layer callback that rebuilds this node when a
+    /// proxy dial fails. The proxy is loopback to the embedded node; when it
+    /// stops answering (control/DERP stale after a background stay, or the
+    /// node hung), the SSH reconnect loop would otherwise dial the same dead
+    /// proxy forever. Rebuilding swaps in a fresh loopback proxy for the
+    /// next attempt — the same recovery a full app restart gets, without
+    /// leaving the app.
+    ///
+    /// Registration is idempotent and happens on every `start()`; the
+    /// rebuild itself is throttled so a Host that is genuinely unreachable
+    /// cannot churn the node every retry.
+    private func installProxyFailureRebuild() {
+        SocketConnector.onProxyDialFailure = { @Sendable [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                self.rebuildAfterProxyFailure()
+            }
+        }
+    }
+
+    /// Rebuilds the node after an SSH proxy dial failure, at most once per
+    /// throttling window. A direct dial never triggers this; a proxy dial
+    /// failing while the node is not even verified is a different failure
+    /// (the proxy would not be set), so the guard is belt-and-braces.
+    private func rebuildAfterProxyFailure() {
+        guard isVerified, node != nil else { return }
+        let now = ContinuousClock.now
+        if let last = lastProxyRebuildAt,
+            now - last < Self.proxyRebuildThrottle
+        {
+            return
+        }
+        lastProxyRebuildAt = now
+        logger.log("Tailnet: SSH proxy dial failed; rebuilding node")
+        guard let dead = node else { return }
+        stopNodeForRestart(dead)
+        start()
+    }
+
+    /// Minimum gap between proxy-failure rebuilds: long enough that a Host
+    /// outage does not churn the node, short enough that a stale node is
+    /// repaired promptly after the first failure.
+    private static let proxyRebuildThrottle: Duration = .seconds(20)
 
     /// Tears down a running node so a new one can be created with an auth key.
     /// Clears `node` synchronously (the close happens in the background) so a

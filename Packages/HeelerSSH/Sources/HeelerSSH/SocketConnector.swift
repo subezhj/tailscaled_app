@@ -26,6 +26,19 @@ public enum SocketConnector {
     }
     private static nonisolated(unsafe) var _forceDirect = false
 
+    /// Fired when a connection that rode the tailnet SOCKS5 proxy fails. The
+    /// embedded Tailscale node's loopback proxy can go stale (control-plane
+    /// or DERP sessions die after a long background stay, or the node itself
+    /// hangs), and every retry then dials the same dead proxy — the SSH layer
+    /// cannot repair it, only recreate the node. The owner (app layer)
+    /// registers this to tear the node down and rebuild it, which swaps in a
+    /// fresh proxy the next retry can use. Throttled by the owner, not here.
+    public static var onProxyDialFailure: (@Sendable () -> Void)? {
+        get { _onProxyDialFailure }
+        set { _onProxyDialFailure = newValue }
+    }
+    private static nonisolated(unsafe) var _onProxyDialFailure: (@Sendable () -> Void)?
+
     /// Diagnostic record of the most recent connection attempt: which host,
     /// whether it rode the tailnet proxy, and whether it failed. Lets the UI
     /// answer "did my SSH actually go through Tailscale?"
@@ -88,6 +101,14 @@ public enum SocketConnector {
             lastDialReport = DialReport(
                 host: endpoint.host, port: endpoint.port,
                 viaProxy: viaProxy, failed: true)
+            // A proxy dial failure means the embedded node's loopback proxy
+            // is dead or its tailnet is stale — the SSH layer cannot repair
+            // it, and every retry would dial the same dead proxy. Nudge the
+            // owner to rebuild the node so the next attempt gets a fresh
+            // proxy. Direct dials never take this path.
+            if viaProxy {
+                onProxyDialFailure?()
+            }
             throw error
         }
     }

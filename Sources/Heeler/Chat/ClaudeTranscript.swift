@@ -298,12 +298,12 @@ enum ClaudeTranscript {
 
     // MARK: - Block helpers
 
-    private static func toolName(in block: Block) -> String {
+    private static func toolName(in block: Message.Block) -> String {
         if case .tool(let call) = block { return call.name }
         return "tool"
     }
 
-    private static func toolInput(in block: Block) -> JSONValue? {
+    private static func toolInput(in block: Message.Block) -> JSONValue? {
         if case .tool(let call) = block { return call.input }
         return nil
     }

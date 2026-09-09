@@ -43,9 +43,13 @@ final class ChatTranscriptStore {
     }
 
     func reload(force: Bool = false) {
-        guard loadTask == nil else {
-            if force { loadTask?.cancel(); loadTask = nil }
-            else { return }
+        if let existing = loadTask {
+            // A reload is already in flight. A force reload cancels it and
+            // starts fresh (agent status moved, pull-to-refresh, send); a
+            // gentle reload is a no-op to avoid stacking duplicate polls.
+            guard force else { return }
+            existing.cancel()
+            loadTask = nil
         }
         phase = .loading
         loadTask = Task { [weak self] in

@@ -323,6 +323,15 @@ final class ConsoleStore {
         }
     }
 
+    /// The Chat view's data source: reads the Host's most recent claude
+    /// session transcript over exec. Uncached — the Store reloads on status
+    /// change and pull-to-refresh.
+    func readClaudeTranscript(on hostID: Host.ID) async throws -> Data {
+        try await projection(for: hostID).session.withTransport { transport in
+            try await transport.readClaudeTranscript()
+        }
+    }
+
     /// Composer's one-shot delivery source. Prompts borrow the Host's current
     /// Console connection rather than dialing a parallel connection or holding
     /// an RPC open for Agent completion.

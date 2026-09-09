@@ -173,6 +173,9 @@ struct AgentTerminalView: View {
     @State private var worktreeStore: WorktreeDetailStore?
     @State private var isShowingAttachLinks = false
     @State private var closeErrorMessage: String?
+    /// Chat View mode: false renders the live TUI, true renders the
+    /// phone-native conversation over the same session.
+    @State private var isShowingChat = false
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
@@ -358,7 +361,13 @@ struct AgentTerminalView: View {
     }
 
     private var presentedSurface: some View {
-        terminalSurface
+        Group {
+            if isShowingChat {
+                chatSurface
+            } else {
+                terminalSurface
+            }
+        }
         .photosPicker(
             isPresented: $isSelectingPhoto,
             selection: $selectedPhoto,
@@ -688,6 +697,7 @@ struct AgentTerminalView: View {
                 } : nil,
             renameAgent: { isRenamingAgent = true },
             renameWorkspace: { isRenamingWorkspace = true },
+            showChat: { isShowingChat = true },
             closeAgent: { isConfirmingClose = true })
     }
 
@@ -775,6 +785,63 @@ struct AgentTerminalView: View {
         .toolbarBackground(Color.clear, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .toolbar(.visible, for: .navigationBar)
+    }
+
+    /// Phone-native conversation over the same agent session. Reads the
+    /// Host's claude transcript over exec; sending reuses the composer's
+    /// one-shot prompt delivery so the agent sees the message exactly as in
+    /// the TUI.
+    private var chatSurface: some View {
+        AgentChatView(
+            agent: agent,
+            console: console,
+            onSend: { [composer] text in
+                Task { @MainActor in
+                    composer.replaceDraft(with: text)
+                    _ = await composer.send()
+                }
+            },
+            theme: terminal.themes.selection(for: colorScheme),
+            colorScheme: colorScheme)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            chatModeBar
+        }
+        .navigationBarBackButtonHidden(true)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(Color.clear, for: .navigationBar)
+        .toolbarBackground(.visible, for: .navigationBar)
+        .toolbar(.visible, for: .navigationBar)
+    }
+
+    /// The thin mode switcher riding above the chat transcript: back to the
+    /// live TUI on the left, agent identity in the middle.
+    private var chatModeBar: some View {
+        HStack(spacing: 10) {
+            Button {
+                isShowingChat = false
+            } label: {
+                Label("Terminal", systemImage: "chevron.left")
+                    .font(.subheadline)
+            }
+            .buttonStyle(.borderless)
+            Spacer()
+            VStack(spacing: 1) {
+                Text(Self.displayTitle(for: agent))
+                    .font(.subheadline.weight(.semibold))
+                Text(agent.agent.kind)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            // Balance the leading button so the title stays centered.
+            Label("Terminal", systemImage: "chevron.left")
+                .font(.subheadline)
+                .hidden()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(.bar)
     }
 
     private func prepareComposerKeyboardPresentation(

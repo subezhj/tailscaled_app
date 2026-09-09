@@ -592,6 +592,10 @@ actor HeelerSSHTransport: Transport {
         return content
     }
 
+    func readClaudeTranscript() async throws -> Data {
+        try await runHostCommand(ClaudeTranscript.latestSessionCommand())
+    }
+
     func listAgents() async throws -> [Agent] {
         try await request(method: "agent.list", decoding: AgentListResponse.self)
             .agents.map(Agent.init)

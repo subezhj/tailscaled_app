@@ -202,6 +202,12 @@ protocol Transport: Sendable {
     /// as `listSkills`.
     func readSkillFile(atPath path: String) async throws -> String
 
+    /// Reads the most recently modified claude-code session transcript
+    /// (tail of `~/.claude/projects/<slug>/<session>.jsonl`) over exec,
+    /// returning the raw marker-framed payload. Transports without a Host
+    /// process environment return an empty transcript.
+    func readClaudeTranscript() async throws -> Data
+
     /// Whether the underlying connection to the Host is still alive. The
     /// reconnect machinery (#18) decides "re-subscribe on this connection or
     /// re-establish it" from this flag.
@@ -235,6 +241,10 @@ extension Transport {
     func readSkillFile(atPath path: String) async throws -> String {
         throw TransportError.channelFailed(
             detail: "This transport cannot read skill files.")
+    }
+
+    func readClaudeTranscript() async throws -> Data {
+        Data()
     }
 
     /// Non-SSH test doubles and alternative transports can state that SFTP is

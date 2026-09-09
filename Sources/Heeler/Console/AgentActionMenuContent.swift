@@ -8,6 +8,7 @@ enum AgentActionMenuItem: Equatable, Hashable, Sendable, CaseIterable {
     case addFile
     case openTerminal
     case newAgent
+    case chat
     case skills
     case snippets
     case worktreeDetails
@@ -21,6 +22,7 @@ enum AgentActionMenuItem: Equatable, Hashable, Sendable, CaseIterable {
         case .addFile: "Add File"
         case .openTerminal: "Open Terminal"
         case .newAgent: "New Agent"
+        case .chat: "Chat View"
         case .skills: "Skills"
         case .snippets: "Snippets"
         case .worktreeDetails: "Worktree Details"
@@ -36,6 +38,7 @@ enum AgentActionMenuItem: Equatable, Hashable, Sendable, CaseIterable {
         case .addFile: "doc"
         case .openTerminal: "apple.terminal"
         case .newAgent: "plus"
+        case .chat: "bubble.left.and.bubble.right"
         case .skills: "sparkles"
         case .snippets: "quote.bubble"
         case .worktreeDetails: "arrow.triangle.branch"
@@ -58,7 +61,7 @@ enum AgentActionMenuItem: Equatable, Hashable, Sendable, CaseIterable {
         switch self {
         case .addImage, .addFile, .skills, .snippets:
             true
-        case .openTerminal, .newAgent, .worktreeDetails, .renameAgent,
+        case .openTerminal, .newAgent, .chat, .worktreeDetails, .renameAgent,
             .renameWorkspace, .closeAgent:
             false
         }
@@ -78,7 +81,7 @@ enum AgentActionMenuSection: Equatable, Hashable, Sendable, CaseIterable {
         case .addAttachments:
             [.addImage, .addFile]
         case .sessionTools:
-            [.openTerminal, .newAgent, .skills, .snippets]
+            [.openTerminal, .newAgent, .chat, .skills, .snippets]
         case .agentLifecycle:
             [.worktreeDetails, .renameAgent, .renameWorkspace, .closeAgent]
         }
@@ -138,6 +141,8 @@ enum AgentActionMenuPolicy {
             actions.openTerminal?()
         case .newAgent:
             actions.startAgent()
+        case .chat:
+            actions.showChat()
         case .skills:
             actions.showSkills?()
         case .snippets:

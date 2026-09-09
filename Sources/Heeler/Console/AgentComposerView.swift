@@ -58,6 +58,8 @@ struct AgentComposerActions {
     let showWorktreeDetails: (() -> Void)?
     let renameAgent: () -> Void
     let renameWorkspace: () -> Void
+    /// Switches this Agent's surface to the phone-native Chat view.
+    let showChat: () -> Void
     let closeAgent: () -> Void
 }
 

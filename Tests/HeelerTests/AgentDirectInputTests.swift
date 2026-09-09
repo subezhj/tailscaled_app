@@ -120,6 +120,7 @@ struct AgentDirectInputTests {
             (.addFile, "Add File", "doc", false, true),
             (.openTerminal, "Open Terminal", "apple.terminal", false, false),
             (.newAgent, "New Agent", "plus", false, false),
+            (.chat, "Chat View", "bubble.left.and.bubble.right", false, false),
             (.skills, "Skills", "sparkles", false, true),
             (.snippets, "Snippets", "quote.bubble", false, true),
             (.worktreeDetails, "Worktree Details", "arrow.triangle.branch", false, false),
@@ -155,6 +156,7 @@ struct AgentDirectInputTests {
             showWorktreeDetails: nil,
             renameAgent: { events.append(.renameAgent) },
             renameWorkspace: { events.append(.renameWorkspace) },
+            showChat: { events.append(.chat) },
             closeAgent: { events.append(.closeAgent) })
         let busy = AgentComposerActions(
             canBegin: true,
@@ -170,6 +172,7 @@ struct AgentDirectInputTests {
             showWorktreeDetails: { events.append(.worktree) },
             renameAgent: { events.append(.renameAgent) },
             renameWorkspace: { events.append(.renameWorkspace) },
+            showChat: { events.append(.chat) },
             closeAgent: { events.append(.closeAgent) })
         let ready = AgentComposerActions(
             canBegin: true,
@@ -185,6 +188,7 @@ struct AgentDirectInputTests {
             showWorktreeDetails: { events.append(.worktree) },
             renameAgent: { events.append(.renameAgent) },
             renameWorkspace: { events.append(.renameWorkspace) },
+            showChat: { events.append(.chat) },
             closeAgent: { events.append(.closeAgent) })
 
         let availability: [(AgentActionMenuItem, AgentComposerActions, Bool, Bool)] = [
@@ -213,7 +217,8 @@ struct AgentDirectInputTests {
         }
         #expect(
             events == [
-                .addImage, .addFile, .openTerminal, .startAgent, .skills, .snippets,
+                .addImage, .addFile, .openTerminal, .startAgent, .chat,
+                .skills, .snippets,
                 .worktree, .renameAgent, .renameWorkspace, .closeAgent,
             ])
     }
@@ -238,6 +243,7 @@ struct AgentDirectInputTests {
             showWorktreeDetails: { steps.append(.action(.worktreeDetails)) },
             renameAgent: { steps.append(.action(.renameAgent)) },
             renameWorkspace: { steps.append(.action(.renameWorkspace)) },
+            showChat: { steps.append(.action(.chat)) },
             closeAgent: { steps.append(.action(.closeAgent)) })
         let restoreComposerThen: (@escaping () -> Void) -> Void = { action in
             steps.append(.restore)
@@ -257,6 +263,7 @@ struct AgentDirectInputTests {
                 .restore, .action(.addFile),
                 .action(.openTerminal),
                 .action(.newAgent),
+                .action(.chat),
                 .restore, .action(.skills),
                 .restore, .action(.snippets),
                 .action(.worktreeDetails),

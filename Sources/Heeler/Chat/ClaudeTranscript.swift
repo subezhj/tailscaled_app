@@ -47,7 +47,8 @@ enum ClaudeTranscript {
 
         let id: String
         let role: Role
-        let blocks: [Block]
+        /// Mutable so a later tool_result row can fold into its tool_use.
+        var blocks: [Block]
         let timestamp: Date?
         let cwd: String?
         let usage: Usage?
@@ -146,9 +147,8 @@ enum ClaudeTranscript {
                         guard let toolUseID = block["tool_use_id"] as? String,
                             let slot = pendingTools[toolUseID]
                         else { continue }
-                        messages[slot.msgIndex].blocks[slot.blockIndex] =
-                            .tool(
-                                ToolCall(
+                        messages[slot.msgIndex].blocks[slot.blockIndex] = Message.Block.tool(
+                                Message.ToolCall(
                                     id: toolUseID,
                                     name: Self.toolName(
                                         in: messages[slot.msgIndex]
@@ -173,10 +173,10 @@ enum ClaudeTranscript {
             }
 
             if type == "assistant" {
-                var blocks: [Block] = []
-                var usage: Usage?
+                var blocks: [Message.Block] = []
+                var usage: Message.Usage?
                 if let u = message?["usage"] as? [String: Any] {
-                    usage = Usage(
+                    usage = Message.Usage(
                         inputTokens: (u["input_tokens"] as? Int) ?? 0,
                         outputTokens: (u["output_tokens"] as? Int) ?? 0,
                         cacheReadTokens: (u["cache_read_input_tokens"] as? Int) ?? 0)
@@ -190,19 +190,19 @@ enum ClaudeTranscript {
                         switch blockType {
                         case "text":
                             if let t = block["text"] as? String {
-                                blocks.append(.text(t))
+                                blocks.append(Message.Block.text(t))
                             }
                         case "thinking":
                             if let t = block["thinking"] as? String {
-                                blocks.append(.thinking(t))
+                                blocks.append(Message.Block.thinking(t))
                             }
                         case "tool_use":
                             let toolID = block["id"] as? String
                                 ?? UUID().uuidString
                             let name = block["name"] as? String ?? "tool"
                             let input = Self.jsonValue(block["input"])
-                            blocks.append(.tool(
-                                ToolCall(
+                            blocks.append(Message.Block.tool(
+                                Message.ToolCall(
                                     id: toolID, name: name,
                                     input: input, result: nil)))
                             if let toolID = block["id"] as? String {
@@ -210,12 +210,12 @@ enum ClaudeTranscript {
                                     messages.count, blocks.count - 1)
                             }
                         default:
-                            blocks.append(.unknown(
+                            blocks.append(Message.Block.unknown(
                                 "\(blockType) (\(Self.describe(block)))"))
                         }
                     }
                 } else if let text = content as? String {
-                    blocks.append(.text(text))
+                    blocks.append(Message.Block.text(text))
                 }
                 let msg = Message(
                     id: uuid, role: .assistant, blocks: blocks,
@@ -263,10 +263,10 @@ enum ClaudeTranscript {
         timestamp: Date?
     ) -> Message {
         let content = message?["content"]
-        var blocks: [Block] = []
+        var blocks: [Message.Block] = []
         if let text = content as? String, !text.isEmpty {
             if !isInvisible(text) {
-                blocks.append(.text(text))
+                blocks.append(Message.Block.text(text))
             }
         } else if let array = content as? [[String: Any]] {
             for block in array {
@@ -276,17 +276,17 @@ enum ClaudeTranscript {
                     if let t = block["text"] as? String,
                         !isInvisible(t)
                     {
-                        blocks.append(.text(t))
+                        blocks.append(Message.Block.text(t))
                     }
                 case "image":
                     // A user-dropped image. The JSONL carries source
                     // metadata, not the bytes; render a note instead of
                     // shipping the file over exec.
                     let mediaType = block["media_type"] as? String ?? "image"
-                    blocks.append(.attachment(mediaType))
+                    blocks.append(Message.Block.attachment(mediaType))
                 case "tool_result": break // folded into assistant tool_use
                 default:
-                    blocks.append(.unknown(
+                    blocks.append(Message.Block.unknown(
                         "\(blockType) (\(Self.describe(block)))"))
                 }
             }

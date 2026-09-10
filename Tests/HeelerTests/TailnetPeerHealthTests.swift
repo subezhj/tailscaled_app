@@ -78,7 +78,10 @@ final class TailnetPeerHealthTests: XCTestCase {
         XCTAssertEqual(byFQDN, byIP)
     }
 
-    func testStaleHandshakeIsUnhealthyEvenWhenOnline() throws {
+    func testOnlinePeerIsHealthyRegardlessOfHandshakeField() throws {
+        // `statusJSON` Peer rows do not decode LastHandshake; health is
+        // online-only, so an online peer reads healthy even when the raw JSON
+        // (ignored field) claims an old handshake.
         let stalePeerJSON = """
         {
           "Peer": {
@@ -97,7 +100,7 @@ final class TailnetPeerHealthTests: XCTestCase {
         let health = try health(fromJSON: stalePeerJSON)
         let peer = try XCTUnwrap(health["100.64.0.1"])
         XCTAssertTrue(peer.online)
-        XCTAssertFalse(peer.isHealthy, "stale handshake must read unhealthy")
+        XCTAssertTrue(peer.isHealthy)
     }
 
     func testEmptyStatusYieldsEmptyHealth() throws {
@@ -105,7 +108,9 @@ final class TailnetPeerHealthTests: XCTestCase {
         XCTAssertTrue(health.isEmpty)
     }
 
-    func testGoZeroHandshakeBecomesNil() throws {
+    func testHandshakeFieldIsNotDecoded() throws {
+        // PeerStatus has no LastHandshake member; the field in the JSON is
+        // ignored, and lastHandshake stays nil rather than crashing the decode.
         let zeroHandshakeJSON = """
         {
           "Peer": {
@@ -124,6 +129,6 @@ final class TailnetPeerHealthTests: XCTestCase {
         let health = try health(fromJSON: zeroHandshakeJSON)
         let peer = try XCTUnwrap(health["100.64.0.1"])
         XCTAssertNil(peer.lastHandshake)
-        XCTAssertFalse(peer.isHealthy)
+        XCTAssertTrue(peer.isHealthy)
     }
 }

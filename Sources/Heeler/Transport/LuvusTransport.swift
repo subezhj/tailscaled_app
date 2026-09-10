@@ -79,6 +79,20 @@ struct LuvusTransport: Transport {
             detail: "luvus agent key control is not wired up yet.")
     }
 
+    func startAgentInNewWorktree(
+        _ request: AgentLaunchRequest, worktree: WorktreeSpec
+    ) async throws -> Agent {
+        throw TransportError.channelFailed(
+            detail: "luvus worktree launches are not wired up yet.")
+    }
+
+    func startAgentInNewWorkspace(
+        _ request: AgentLaunchRequest, workspace: NewWorkspaceSpec
+    ) async throws -> Agent {
+        throw TransportError.channelFailed(
+            detail: "luvus workspace launches are not wired up yet.")
+    }
+
     func closePane(_ params: PaneTarget) async throws {
         throw TransportError.channelFailed(
             detail: "luvus pane control is not wired up yet.")

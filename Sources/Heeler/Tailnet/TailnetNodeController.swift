@@ -354,11 +354,13 @@ final class TailnetNodeController: ObservableObject {
         var result: [String: TailnetPeerHealth] = [:]
         guard let peers = status.Peer else { return result }
         for peer in peers.values {
+            // `statusJSON`'s Peer rows carry Online/Relay but not a handshake
+            // timestamp (that lives in the netmap's PeerStatusLite); staleness
+            // is therefore not observable here — health is online-only.
             let health = TailnetPeerHealth(
                 online: peer.Online,
                 relay: peer.Relay,
-                lastHandshake: peer.LastHandshake.isGoZeroTime
-                    ? nil : peer.LastHandshake)
+                lastHandshake: nil)
             var keys: [String] = []
             if !peer.DNSName.isEmpty {
                 keys.append(peer.DNSName)

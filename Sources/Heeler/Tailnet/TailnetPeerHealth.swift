@@ -25,15 +25,10 @@ struct TailnetPeerHealth: Equatable, Sendable {
     /// online peer means the path died without a state transition — the
     /// health monitor's re-dial trigger.
     var isHealthy: Bool {
-        online && handshakeIsFresh
+        // `statusJSON` Peer rows carry Online but not a handshake timestamp,
+        // so staleness is not observable here; health is online-only until a
+        // source with handshake data is wired in. `lastHandshake` stays a
+        // field so a future richer source can feed it without a shape change.
+        online
     }
-
-    private var handshakeIsFresh: Bool {
-        guard let lastHandshake else { return false }
-        return Date().timeIntervalSince(lastHandshake) < Self.staleHandshakeWindow
-    }
-
-    /// A peer with no recent handshake is treated as stale even when the
-    /// status still reports it online; this is the window.
-    static let staleHandshakeWindow: TimeInterval = 90
 }

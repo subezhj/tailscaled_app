@@ -54,4 +54,43 @@ struct LuvusTransport: Transport {
             version: caps.version ?? "luvus",
             protocolVersion: 1)
     }
+
+    // MARK: - Honest "not wired up yet" for the remaining required methods
+
+    /// UHP's event stream exists but this build has not mapped the wire
+    /// shapes yet; a luvus Host must not claim a live Console feed it cannot
+    /// deliver.
+    func subscribeToEvents(_ subscriptions: [EventSubscription]) async throws
+        -> HerdrEventStream
+    {
+        throw TransportError.channelFailed(
+            detail: "luvus event streaming is not wired up yet.")
+    }
+
+    func attachTerminal(_ request: TerminalAttachRequest) async throws
+        -> TerminalAttachSession
+    {
+        throw TransportError.channelFailed(
+            detail: "luvus terminal attach is not wired up yet.")
+    }
+
+    func sendAgentKeys(_ params: AgentSendKeysParams) async throws {
+        throw TransportError.channelFailed(
+            detail: "luvus agent key control is not wired up yet.")
+    }
+
+    func closePane(_ params: PaneTarget) async throws {
+        throw TransportError.channelFailed(
+            detail: "luvus pane control is not wired up yet.")
+    }
+
+    func renameAgent(_ params: AgentRenameParams) async throws {
+        throw TransportError.channelFailed(
+            detail: "luvus agent rename is not wired up yet.")
+    }
+
+    func renameWorkspace(_ params: WorkspaceRenameParams) async throws {
+        throw TransportError.channelFailed(
+            detail: "luvus workspace rename is not wired up yet.")
+    }
 }

@@ -327,7 +327,7 @@ final class TailnetNodeController: ObservableObject {
         guard let node, isVerified else { return }
         do {
             let data = try await node.statusJSON()
-            let status = try JSONDecoder().decode(Ipn.Status.self, from: data)
+            let status = try JSONDecoder().decode(IpnState.Status.self, from: data)
             let health = Self.peerHealth(from: status)
             guard !Task.isCancelled else { return }
             peerHealth = health
@@ -350,7 +350,7 @@ final class TailnetNodeController: ObservableObject {
     /// every hostname and tailnet IP a peer carries, so a Host configured
     /// with `100.x`, `magic-name`, or `magic-name.tailnet.ts.net` all find
     /// the same peer.
-    static func peerHealth(from status: TailscaleKit.Ipn.Status) -> [String: TailnetPeerHealth] {
+    static func peerHealth(from status: TailscaleKit.IpnState.Status) -> [String: TailnetPeerHealth] {
         var result: [String: TailnetPeerHealth] = [:]
         guard let peers = status.Peer else { return result }
         for peer in peers.values {

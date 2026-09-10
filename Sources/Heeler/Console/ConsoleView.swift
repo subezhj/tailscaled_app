@@ -342,7 +342,7 @@ struct ConsoleView: View {
         systemImage: String,
         selected: Bool,
         disabled: Bool = false,
-        contextMenu: @escaping () -> some View = { EmptyView() },
+        @ViewBuilder contextMenu: @escaping () -> some View = { EmptyView() },
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
@@ -360,8 +360,8 @@ struct ConsoleView: View {
                         ? Color.accentColor.opacity(0.9)
                         : Color(uiColor: .secondarySystemBackground)))
             .foregroundStyle(
-                disabled ? .secondary
-                    : selected ? .white : .primary)
+                disabled ? Color.secondary
+                    : selected ? Color.white : Color.primary)
         }
         .buttonStyle(.plain)
         .disabled(disabled && !selected)

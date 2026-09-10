@@ -89,11 +89,11 @@ struct HostDraft: Equatable, Sendable {
             username: username.trimmingCharacters(in: .whitespaces),
             authMethod: authMethod,
             sessionName: sessionName.trimmingCharacters(in: .whitespaces),
-            backend: backend,
             jumpAddress: jumpAddress.trimmingCharacters(in: .whitespaces),
             jumpPort: jumpPortNumber ?? 22,
             jumpUsername: jumpUsername.trimmingCharacters(in: .whitespaces),
-            isDisabled: isDisabled)
+            isDisabled: isDisabled,
+            backend: backend)
     }
 
     /// What to hand `HostStore.add/update` as the password argument: a new

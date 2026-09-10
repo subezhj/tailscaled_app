@@ -6,7 +6,7 @@ final class TailnetPeerHealthTests: XCTestCase {
     /// path the controller uses, then runs `peerHealth(from:)`.
     private func health(fromJSON json: String) throws -> [String: TailnetPeerHealth] {
         let data = try XCTUnwrap(json.data(using: .utf8))
-        let status = try JSONDecoder().decode(TailscaleKit.Ipn.Status.self, from: data)
+        let status = try JSONDecoder().decode(TailscaleKit.IpnState.Status.self, from: data)
         return TailnetNodeController.peerHealth(from: status)
     }
 

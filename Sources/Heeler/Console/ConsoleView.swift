@@ -170,7 +170,9 @@ struct ConsoleView: View {
                         relaySettings: relaySettings,
                         liveActivities: liveActivities,
                         tailnet: tailnet,
-                        audioKeeper: audioKeeper)
+                        audioKeeper: audioKeeper,
+                        console: console,
+                        hosts: hosts.hosts)
                 }
         } detail: {
             detail
@@ -479,6 +481,7 @@ struct ConsoleView: View {
         NavigationLink(value: agent.id) {
             AgentCardView(
                 agent: agent,
+                layout: console.rowLayout(for: agent.hostID),
                 isPinned: console.pins.isPinned(
                     hostID: agent.hostID, paneID: agent.agent.paneID))
         }

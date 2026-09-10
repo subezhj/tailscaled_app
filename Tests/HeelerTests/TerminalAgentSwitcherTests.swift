@@ -1,4 +1,6 @@
 import Foundation
+import GhosttyTerminal
+import Observation
 import Testing
 import SwiftUI
 import UIKit
@@ -40,7 +42,7 @@ struct TerminalAgentSwitcherTests {
         _ agent: ConsoleAgent, status: AgentStatus? = nil, isPinned: Bool = false
     ) -> TerminalAgentSwitcherItem {
         TerminalAgentSwitcherItem(
-            id: agent.id, title: agent.switcherLabel,
+            id: agent.id, title: AgentCardPresentation(agent: agent).switcherTitle,
             status: status ?? agent.agent.status, isPinned: isPinned)
     }
 
@@ -51,14 +53,15 @@ struct TerminalAgentSwitcherTests {
         }
     }
 
-    /// The project is what tells a console full of `claude` apart, so it
-    /// leads; the agent's own name is the fallback when nothing named the
-    /// workspace.
-    @Test func chipLabelsPreferTheProject() {
-        #expect(Self.makeAgent(pane: "p1", workspace: "proj", repo: "repo").switcherLabel == "proj")
-        #expect(Self.makeAgent(pane: "p2", repo: "repo").switcherLabel == "repo")
-        #expect(Self.makeAgent(pane: "p3", name: "reviewer").switcherLabel == "reviewer")
-        #expect(Self.makeAgent(pane: "p4").switcherLabel == "claude")
+    @Test func chipLabelsUseTheSharedFirstRowAndBoundLongText() {
+        let project = Self.makeAgent(pane: "p1", workspace: "proj", repo: "repo")
+        #expect(AgentCardPresentation(agent: project).switcherTitle == "proj")
+        let fallback = Self.makeAgent(pane: "p2", repo: "repo", name: "reviewer")
+        #expect(AgentCardPresentation(agent: fallback).switcherTitle == "reviewer")
+        let long = Self.makeAgent(pane: "p3", workspace: String(repeating: "👨‍👩‍👧‍👦", count: 70))
+        let title = AgentCardPresentation(agent: long).switcherTitle
+        #expect(title.count == 48 && title.hasSuffix("…"))
+        #expect(AgentCardPresentation(agent: project, layout: .init(rows: [])).switcherTitle == "claude")
     }
 
     @MainActor
@@ -188,6 +191,11 @@ struct TerminalAgentSwitcherTests {
         let pinned = TerminalAgentSwitcherItem(agent: agent, pins: pins)
         #expect(pinned.id == agent.id)
         #expect(pinned.isPinned)
+        let layout = AgentRowLayout(rows: [[.init(.agent)], [.init(.workspace)]])
+        let custom = TerminalAgentSwitcherItem(agent: agent, pins: pins, layout: layout)
+        #expect(custom.title == AgentCardPresentation(agent: agent, layout: layout).switcherTitle)
+        #expect(custom.title == "claude" && custom.isPinned)
+        #expect(custom.status == .blocked)
     }
 
     /// Long-press is Pin / Unpin, matching the Console row, so the user can
@@ -770,6 +778,13 @@ struct TerminalAgentSwitcherTests {
                 reportedGrids.append(TerminalGrid(columns: columns, rows: rows))
             },
             notificationCenter: center)
+        // The freeze's own transitions, so each step below waits on the fact
+        // it is about to assert rather than on how quickly this runner gets
+        // Ghostty to answer. Polling for reports to appear and go quiet timed
+        // out here for thirteen seconds on merge CI, and could not say whether
+        // the freeze was still holding or had thawed with nothing to forward
+        // (#263).
+        let phases = TerminalGridReportPhaseRecorder(observing: terminal)
         let host = UIViewController()
         let window = try await makeTestWindow(
             frame: CGRect(x: 0, y: 0, width: 390, height: 700),
@@ -789,6 +804,11 @@ struct TerminalAgentSwitcherTests {
         terminal.frame = CGRect(x: 0, y: 0, width: 390, height: 600)
         host.view.addSubview(terminal)
         window.layoutIfNeeded()
+        // Only a first responder is handed the settle signal that ends this
+        // freeze, so a refused claim is a different failure from a freeze that
+        // would not thaw — and has to be told apart from one.
+        #expect(terminal.isFirstResponder)
+        #expect(terminal.gridReportPhase == .deferring)
         let ownKeyboardEndFrame = window.convert(
             localKeyboardFrame, to: window.screen.coordinateSpace)
 
@@ -800,7 +820,10 @@ struct TerminalAgentSwitcherTests {
             name: UIResponder.keyboardDidChangeFrameNotification, object: nil)
 
         // The keyboard is arriving: every bounds UIKit animates through here
-        // is a half-built grid Ghostty must not be measured against.
+        // is a half-built grid Ghostty must not be measured against. The pause
+        // gives the engine's own callbacks a chance to escape the freeze; it
+        // proves nothing on its own, which is what the phase assertions are
+        // for.
         for height: CGFloat in [520, 440, 360] {
             terminal.frame.size.height = height
             terminal.setNeedsLayout()
@@ -808,45 +831,85 @@ struct TerminalAgentSwitcherTests {
             try await Task.sleep(for: .milliseconds(30))
         }
         #expect(reportedGrids.isEmpty)
+        #expect(terminal.gridReportPhase == .deferring)
 
         // The first owned frame still includes both responders' accessories.
         // It rebuilds the input views but must leave the grid frozen until
         // UIKit republishes the destination-only frame.
+        let rebuildsBeforeOwnedFrame = terminal.inputViewRebuildCount
         center.post(
             name: UIResponder.keyboardDidChangeFrameNotification, object: nil,
             userInfo: [UIResponder.keyboardFrameEndUserInfoKey: ownKeyboardEndFrame])
         #expect(reportedGrids.isEmpty)
+        #expect(terminal.gridReportPhase == .deferring)
         await Self.waitForMainQueueTurn()
+        #expect(terminal.inputViewRebuildCount > rebuildsBeforeOwnedFrame)
+        #expect(terminal.gridReportPhase == .deferring)
+
+        // Ghostty measures the surface through this delegate call, and the
+        // thaw forwards whatever it measured last — the settled layout's own
+        // measurement, taken inside the thaw, when the surface is answering.
+        // Standing in for it here is what keeps this off the engine's
+        // schedule: a runner whose surface has not answered at all would
+        // otherwise leave the freeze with nothing to forward, and the
+        // assertions below with nothing to hold it to.
+        terminal.terminalDidResize(
+            TerminalGridMetrics(
+                columns: 39, rows: 22,
+                widthPixels: 1_170, heightPixels: 1_080,
+                cellWidthPixels: 30, cellHeightPixels: 49))
 
         // The rebuilt input views republish the settled destination frame.
         center.post(
             name: UIResponder.keyboardDidChangeFrameNotification, object: nil,
             userInfo: [UIResponder.keyboardFrameEndUserInfoKey: ownKeyboardEndFrame])
-        try await waitForGridReportsToSettle { reportedGrids.count }
+        let forwarded = try await phases.thawedGrid()
         let escaped = reportedGrids
-        #expect(!escaped.isEmpty, "the settled grid never made it past the freeze")
-
-        // Ghostty reports one settled layout more than once, and the thaw only
-        // coalesces the reports that land inside its window, so how many escape
-        // is a matter of how busy the machine is. What must hold whatever the
-        // schedule is that every one of them carries the settled grid and none
-        // of the taller or half-built ones the freeze held back. So measure the
-        // settled bounds again here, through the ordinary unfrozen path, and
-        // hold what escaped against it.
-        reportedGrids = []
-        for height: CGFloat in [600, 360] {
-            terminal.frame.size.height = height
-            terminal.setNeedsLayout()
-            terminal.layoutIfNeeded()
-            try await Task.sleep(for: .milliseconds(30))
-        }
-        try await waitForGridReportsToSettle { reportedGrids.count }
         let settled = try #require(
-            reportedGrids.last, "the terminal never measured its settled bounds")
+            forwarded, "the freeze ended without telling the Host any grid")
 
         #expect(
-            Set(escaped) == [settled],
+            settled == terminal.measuredGrid,
+            "the thaw forwarded \(settled), not the grid the surface settled on")
+        // Whatever escaped has to be that one grid — never a taller or
+        // half-built one from inside the freeze, and never nothing at all.
+        #expect(
+            escaped == [TerminalGrid(columns: settled.columns, rows: settled.rows)],
             "the freeze let a grid other than the settled \(settled) out: \(escaped)")
+    }
+
+    /// The freeze suppresses `layoutSubviews` outright, so entering it commits
+    /// the terminal to a settle signal only a first responder is sent. A claim
+    /// UIKit refuses leaves nothing that can end it — the grid would stay
+    /// frozen, and the surface unlaid, until the wall-clock leash.
+    @MainActor
+    @Test func aRefusedKeyboardClaimThawsTheGridWithoutTheLeash() async throws {
+        let center = NotificationCenter()
+        let terminal = TerminalScreenView.makeConfiguredTerminal(
+            notificationCenter: center)
+        let phases = TerminalGridReportPhaseRecorder(observing: terminal)
+        let host = UIViewController()
+        let window = try await makeTestWindow(
+            frame: CGRect(x: 0, y: 0, width: 390, height: 700),
+            rootViewController: host)
+        defer {
+            terminal.removeFromSuperview()
+            window.isHidden = true
+        }
+
+        // Local input is what UIKit asks about in `canBecomeFirstResponder`,
+        // so this is a claim that cannot be granted. The leash is stretched
+        // past any plausible test: only the refusal itself can thaw this.
+        terminal.setLocalInputEnabled(false)
+        terminal.keyboardTransitionFallbackDelay = 60
+        terminal.raisesKeyboardWhenReady = true
+        terminal.frame = CGRect(x: 0, y: 0, width: 390, height: 600)
+        host.view.addSubview(terminal)
+        window.layoutIfNeeded()
+
+        #expect(!terminal.isFirstResponder)
+        try await phases.thawedGrid()
+        #expect(terminal.gridReportPhase == .live)
     }
 
     /// `becomeFirstResponder()` and `reloadInputViews()` may synchronously
@@ -916,15 +979,24 @@ struct TerminalAgentSwitcherTests {
     /// destination frame ever arrives, timing out must release the hold
     /// without treating a transient hide as proof that the keyboard left.
     @MainActor
-    @Test func aTerminalTimeoutPreservesItsDestinationOwnedInset() async throws {
+    @Test(.timeLimit(.minutes(1)))
+    func aTerminalTimeoutPreservesItsDestinationOwnedInset() async throws {
         let center = NotificationCenter()
         let inset = TerminalKeyboardInset(notificationCenter: center) { _ in 402 }
+        let presentation = AsyncStream<Void>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        defer { presentation.continuation.finish() }
+        withObservationTracking {
+            _ = inset.height
+        } onChange: {
+            presentation.continuation.yield(())
+        }
         center.post(
             name: UIResponder.keyboardWillShowNotification, object: nil,
             userInfo: [UIResponder.keyboardFrameEndUserInfoKey: CGRect(
                 x: 0, y: 554, width: 440, height: 436)])
-        try await Task.sleep(for: .milliseconds(120))
-        #expect(inset.height == 402)
+        var presentationEvents = presentation.stream.makeAsyncIterator()
+        _ = await presentationEvents.next()
+        try #require(inset.height == 402)
 
         let terminal = TerminalScreenView.makeConfiguredTerminal(
             notificationCenter: center)
@@ -942,20 +1014,23 @@ struct TerminalAgentSwitcherTests {
         window.layoutIfNeeded()
 
         let handoffID = inset.beginDestinationOwnedResponderHandoff()
-        var endedOutcome: TerminalKeyboardHandoffOutcome?
+        let ended = AsyncStream<TerminalKeyboardHandoffOutcome>.makeStream(
+            bufferingPolicy: .bufferingNewest(1))
+        defer { ended.continuation.finish() }
         terminal.onKeyboardHandoffEnded = { endedID, outcome in
             guard endedID == handoffID else { return }
-            endedOutcome = outcome
             switch outcome {
             case .settled, .timedOut:
                 inset.endResponderHandoff(endedID)
             case .cancelled:
                 inset.cancelResponderHandoff(endedID, currentHeight: { 0 })
             }
+            ended.continuation.yield(outcome)
         }
-        #expect(terminal.requestKeyboardHandoff(id: handoffID))
+        try #require(terminal.requestKeyboardHandoff(id: handoffID))
         center.post(name: UIResponder.keyboardWillHideNotification, object: nil)
-        try await Task.sleep(for: .milliseconds(80))
+        var handoffEvents = ended.stream.makeAsyncIterator()
+        let endedOutcome = await handoffEvents.next()
 
         #expect(endedOutcome == .timedOut)
         #expect(!inset.isHoldingHandoffHeight)
@@ -1105,6 +1180,7 @@ struct TerminalAgentSwitcherTests {
                 reportedGrids.append(TerminalGrid(columns: columns, rows: rows))
             },
             notificationCenter: center)
+        let phases = TerminalGridReportPhaseRecorder(observing: terminal)
         let localKeyboardFrame = CGRect(x: 0, y: 400, width: 390, height: 300)
         terminal.keyboardLayoutFrameProvider = { _ in localKeyboardFrame }
         let foreignHost = UIViewController()
@@ -1126,7 +1202,11 @@ struct TerminalAgentSwitcherTests {
         foreignHost.view.addSubview(foreign)
 
         // The handoff itself: the terminal claims the keyboard as it reaches
-        // its window and freezes its grid until that keyboard settles.
+        // its window and freezes its grid until that keyboard settles. This
+        // test drives that settle explicitly, so the wall-clock fallback stays
+        // out of it — a loaded runner must not thaw the freeze the foreign
+        // events below are supposed to leave alone (#225).
+        terminal.keyboardTransitionFallbackDelay = 60
         terminal.raisesKeyboardWhenReady = true
         terminal.frame = CGRect(x: 0, y: 0, width: 390, height: 600)
         host.view.addSubview(terminal)
@@ -1169,6 +1249,7 @@ struct TerminalAgentSwitcherTests {
         }
         #expect(terminal.inputViewRebuildCount == rebuildsBeforeForeignEvent)
         #expect(reportedGrids.isEmpty)
+        #expect(terminal.gridReportPhase == .deferring)
 
         // The first owned frame rebuilds the destination input views while
         // retaining the freeze; their republished frame then thaws it.
@@ -1178,12 +1259,20 @@ struct TerminalAgentSwitcherTests {
         await Self.waitForMainQueueTurn()
         #expect(terminal.inputViewRebuildCount > rebuildsBeforeForeignEvent)
         #expect(reportedGrids.isEmpty)
+        #expect(terminal.gridReportPhase == .deferring)
+        // Stands in for Ghostty measuring the settled layout, so the thaw has
+        // a grid to forward whatever the engine's schedule is here.
+        terminal.terminalDidResize(
+            TerminalGridMetrics(
+                columns: 39, rows: 22,
+                widthPixels: 1_170, heightPixels: 1_080,
+                cellWidthPixels: 30, cellHeightPixels: 49))
         center.post(
             name: UIResponder.keyboardDidChangeFrameNotification, object: nil,
             userInfo: [UIResponder.keyboardFrameEndUserInfoKey: ownKeyboardEndFrame])
-        try await waitForGridReportsToSettle { reportedGrids.count }
+        let forwarded = try await phases.thawedGrid()
         #expect(
-            !reportedGrids.isEmpty,
+            forwarded != nil,
             "the terminal's own settle never made it past the freeze")
     }
 

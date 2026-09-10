@@ -9,9 +9,69 @@ Entries reference the issue that motivated them.
 
 ### Fixed
 
-- New Agent now detects supported Agent CLIs from the Host's standard
-  user-local, Bun, Cargo, Homebrew, and Linuxbrew install paths over SSH.
-  (#254)
+- New Agent now discovers agents installed through mise. The discovery PATH
+  includes mise's shims directory, resolved from `MISE_DATA_DIR` or
+  `XDG_DATA_HOME` when either reaches the non-interactive SSH environment,
+  otherwise `~/.local/share/mise/shims`. (#293)
+- The Lock Screen Live Activity shows three Agents with three-row Agent List
+  Fields instead of two before "+N more". The row budget overestimated card
+  height and its test measured only frame minimums, not the rendered text.
+  Four three-row cards exceed ActivityKit's 160 pt limit, so four rows remain
+  only for two-row layouts. (#281)
+
+## [0.1.6] - 2026-09-09
+
+### Added
+
+- Agent cards and the keyboard switcher use herdr's sidebar fields and Agent
+  order. Customize each Host's card layout in Settings > Agent List Fields:
+  add, style, move, or remove herdr, Heeler, and plugin fields across up to
+  three rows, with a Console preview and automatic saving. Sync from plugin
+  refreshes the first two rows; the third defaults to `directory` and keeps
+  your edits when syncing. (#277, #281)
+
+- Live Activities follow each Host's Agent List Fields, including directory
+  and plugin fields, on the Lock Screen and expanded Dynamic Island. Update
+  the Heeler plugin on each Host to use these fields in background updates.
+  (#281)
+
+### Changed
+
+- Relicensed the Heeler suite from AGPL-3.0 to Apache License 2.0. (#282)
+
+### Fixed
+
+- Hiding Composer keeps terminal links available through a floating link button
+  above the latency indicator. It matches the scroll controls, opens the same
+  link list, and does not reduce the terminal's height. (PR #284)
+
+- Secondary field styles now render correctly in Agent cards and previews. (#281)
+
+- Agent List Fields groups each Host's controls in one card, wraps field
+  chips, and uses the Console card for its preview, including the status
+  badge and Host name. (#281)
+- Connecting to a Host whose login shell is nushell or another non-POSIX shell
+  no longer fails with "The remote home directory could not be resolved". The
+  home probe now runs under POSIX sh, matching the other setup probes. (#275;
+  PR #276)
+
+## [0.1.5] - 2026-09-04
+
+### Added
+
+- Agent detail now has up/down buttons for jumping between your messages and
+  returning to the latest output. You can use them while the Agent is working,
+  and manual scrolling stops a jump. (#268; PR #272)
+
+### Fixed
+
+- Pasting text with Windows-style line breaks now opens the paste review sheet
+  instead of submitting each line separately. (#268)
+
+- Terminal layout now updates immediately when the keyboard cannot open. (#263)
+
+- New Agent now finds Agent CLIs installed with Bun, Cargo, Homebrew, or
+  Linuxbrew, as well as standard user-local installs. (#254)
 
 ## [0.1.4] - 2026-09-01
 

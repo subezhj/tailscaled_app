@@ -87,7 +87,8 @@ struct ContentView: View {
                 },
                 pinnedPaneIDs: { [weak console] id in
                     console?.pins.pinnedPaneIDs(for: id) ?? []
-                }))
+                },
+                rowLayout: { [weak console] id in console?.rowLayout(for: id) }))
     }
 
     private var terminal: TerminalSettings {
@@ -139,6 +140,7 @@ struct ContentView: View {
         .onChange(of: hostStore.hosts) {
             console.setHosts(hostStore.enabledHosts)
             notificationPreferences.setHosts(hostStore.hosts)
+            liveActivities.layoutsDidChange()
         }
         // When the tailnet node reaches Running (proxy injected), retry every
         // Host that is not yet connected — their cold-start dial failed
@@ -163,6 +165,12 @@ struct ContentView: View {
             notificationRouter.agentsDidChange(console.agents)
             bannerStore.agentsDidChange(console.agents)
             liveActivities.agentsDidChange(console.agents)
+        }
+        .onChange(of: console.rowLayouts.hostLayouts) {
+            liveActivities.layoutsDidChange()
+        }
+        .onChange(of: console.sidebarSnapshots.states) {
+            liveActivities.layoutsDidChange()
         }
         .onChange(of: console.pins.revision) {
             liveActivities.pinsDidChange()

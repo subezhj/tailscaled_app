@@ -256,6 +256,10 @@ final class AgentAttachStore {
         terminal.send(keystrokes)
     }
 
+    func sendEscapeKey() {
+        _ = input.sendEscapeKey()
+    }
+
     func scroll(_ sequence: Data, rows: Int) {
         input.scroll(sequence, rows: rows)
     }

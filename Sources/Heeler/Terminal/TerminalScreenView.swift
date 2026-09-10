@@ -73,6 +73,12 @@ final class TerminalKeyboardControl {
         terminal?.sendQuickKey(key)
     }
 
+    /// Stops inertial remote scroll, matching `sendQuickKey`'s reliable-input
+    /// side effect, for routes that do not go through Ghostty `sendInput`.
+    func noteReliableInputBegan() {
+        terminal?.noteReliableInputBegan()
+    }
+
     func setKeyboardMode(_ mode: TerminalKeyboardMode) {
         terminal?.setKeyboardMode(mode)
     }
@@ -142,6 +148,9 @@ struct TerminalScreenView: UIViewRepresentable {
     /// Handed the surface once it exists, so the Agent strip's toggle can
     /// raise and lower this terminal's keyboard.
     var keyboardControl: TerminalKeyboardControl?
+    /// Handed the surface once it exists, so the message-jump chrome can
+    /// drive remote scroll without holding the UIKit view itself.
+    var scrollControl: TerminalScrollControl?
     var isLocalInputEnabled = true
     var textInputStyle = TerminalTextInputStyle.terminal
     var theme: TerminalTheme = .default
@@ -168,6 +177,7 @@ struct TerminalScreenView: UIViewRepresentable {
         view.raisesKeyboardWhenReady = claimsKeyboard?() ?? false
         view.onHistoryRequested = onHistoryRequested
         keyboardControl?.terminal = view
+        scrollControl?.terminal = view
         view.onKeyboardHandoffEnded = { [weak view, weak keyboardControl] id, outcome in
             guard let view else { return }
             if let keyboardControl, keyboardControl.terminal !== view { return }
@@ -223,6 +233,7 @@ struct TerminalScreenView: UIViewRepresentable {
             onScroll: onScroll,
             onPaste: onPaste)
         keyboardControl?.terminal = view
+        scrollControl?.terminal = view
         view.onKeyboardHandoffEnded = { [weak view, weak keyboardControl] id, outcome in
             guard let view else { return }
             if let keyboardControl, keyboardControl.terminal !== view { return }
@@ -263,6 +274,34 @@ struct TerminalScreenView: UIViewRepresentable {
     }
 }
 
+/// A grid as the Host is told about it: the columns and rows a resize report
+/// carries, with the pixel metrics Ghostty measures them from left behind.
+struct TerminalGridSize: Equatable, Sendable, CustomStringConvertible {
+    let columns: Int
+    let rows: Int
+
+    var description: String { "\(columns)x\(rows)" }
+}
+
+/// What the keyboard-transition grid freeze is doing.
+///
+/// The freeze's edges are lifecycle facts — a keyboard claimed, a settled
+/// frame published, the last in-flight callback consumed — but until this
+/// existed the only trace of them was *when* resize reports happened to reach
+/// the Host. Timing is exactly what cannot be read back: the thaw rides
+/// Ghostty's asynchronous resize callbacks, so silence means "still frozen",
+/// "nothing to report" and "the engine has not answered yet" all at once, and
+/// a caller waiting on reports cannot tell which (#263).
+enum TerminalGridReportPhase: Equatable, Sendable {
+    /// Reports reach the Host as they arrive.
+    case live
+    /// Every report is held back; the keyboard is still moving.
+    case deferring
+    /// The thaw was asked for and is waiting on the callbacks that had
+    /// already left Ghostty when it was.
+    case flushing
+}
+
 /// Bridges Ghostty's sendable session callbacks onto the UI's main-actor
 /// closures without making the transport layer depend on Ghostty types.
 private final class TerminalResizeSequence: @unchecked Sendable {
@@ -294,6 +333,13 @@ final class TerminalSessionCallbackBridge {
     var isSizeReportCurrent: ((_ columns: Int, _ rows: Int) -> Bool)?
     var onReliableInput: (() -> Void)?
     var onTerminalInput: ((Data) -> Void)?
+    /// Reports every freeze transition. The return to `.live` carries the grid
+    /// the thaw forwarded, or `nil` when the freeze had none to forward —
+    /// the difference between "the settled grid reached the Host" and "the
+    /// freeze ended having told it nothing", which nothing else records.
+    var onGridReportPhaseChanged: ((
+        _ phase: TerminalGridReportPhase, _ forwarded: TerminalGridSize?
+    ) -> Void)?
     nonisolated private let resizeSequence = TerminalResizeSequence()
     private var pendingResizeReports: [UInt64: InMemoryTerminalViewport] = [:]
     private var lastProcessedResizeSequence: UInt64 = 0
@@ -302,6 +348,14 @@ final class TerminalSessionCallbackBridge {
     private var deferredSize: (columns: Int, rows: Int)?
     private var finishesSizeReportDeferralThrough: UInt64?
     private var suppressesDuplicateSize: (columns: Int, rows: Int)?
+    private var lastNotifiedGridReportPhase = TerminalGridReportPhase.live
+
+    /// Derived from the deferral bookkeeping rather than tracked alongside it,
+    /// so the phase callers observe cannot drift from the one the reports obey.
+    var gridReportPhase: TerminalGridReportPhase {
+        guard defersSizeReports else { return .live }
+        return finishesSizeReportDeferralThrough == nil ? .deferring : .flushing
+    }
 
     init(
         onSizeChanged: ((Int, Int) -> Void)?,
@@ -347,6 +401,7 @@ final class TerminalSessionCallbackBridge {
         deferredSize = nil
         finishesSizeReportDeferralThrough = nil
         suppressesDuplicateSize = nil
+        notifyGridReportPhase()
     }
 
     func finishSizeReportDeferral() {
@@ -355,6 +410,7 @@ final class TerminalSessionCallbackBridge {
         // in force until every callback that had already left Ghostty when the
         // thaw was requested has been consumed in sequence.
         finishesSizeReportDeferralThrough = resizeSequence.current()
+        notifyGridReportPhase()
         completeSizeReportDeferralIfReady()
     }
 
@@ -370,6 +426,7 @@ final class TerminalSessionCallbackBridge {
         deferredSize = nil
         finishesSizeReportDeferralThrough = nil
         suppressesDuplicateSize = nil
+        notifyGridReportPhase()
     }
 
     private func receiveResize(
@@ -403,15 +460,35 @@ final class TerminalSessionCallbackBridge {
         else { return }
         finishesSizeReportDeferralThrough = nil
         defersSizeReports = false
-        guard let deferredSize else { return }
+        // The Host hears the settled grid first, and the phase says `.live`
+        // only once it has: an observer woken by the thaw must find the
+        // report already delivered, not on its way.
+        let forwarded = forwardDeferredSize()
+        notifyGridReportPhase(forwarded: forwarded)
+    }
+
+    /// Hands the Host the one grid the freeze settled on and returns it, or
+    /// returns `nil` when the freeze never learned a grid to forward — the
+    /// next ordinary report speaks for it then.
+    private func forwardDeferredSize() -> TerminalGridSize? {
+        guard let deferredSize else { return nil }
         self.deferredSize = nil
-        guard let onSizeChanged else { return }
+        guard let onSizeChanged else { return nil }
         onSizeChanged(deferredSize.columns, deferredSize.rows)
         // The surface delegate supplied the settled grid synchronously. The
         // equivalent engine callback can still be in Ghostty's IO pipeline;
         // consume that one duplicate when it arrives. A different current
         // grid clears the token and is delivered normally.
         suppressesDuplicateSize = deferredSize
+        return TerminalGridSize(
+            columns: deferredSize.columns, rows: deferredSize.rows)
+    }
+
+    private func notifyGridReportPhase(forwarded: TerminalGridSize? = nil) {
+        let phase = gridReportPhase
+        guard phase != lastNotifiedGridReportPhase else { return }
+        lastNotifiedGridReportPhase = phase
+        onGridReportPhaseChanged?(phase, forwarded)
     }
 
     private func deliverSize(_ size: (columns: Int, rows: Int)) {
@@ -483,6 +560,13 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
     var raisesKeyboardWhenReady = false
     /// Notifies ``TerminalKeyboardControl`` when first-responder intent changes.
     var onFirstResponderChange: (() -> Void)?
+    /// Notifies ``TerminalScrollControl`` when DECSET alternate-screen state
+    /// flips. `refs #268`.
+    var onAlternateScreenChange: (() -> Void)?
+    /// Notifies ``TerminalScrollControl`` that a touch (drag or momentum)
+    /// scrolled by at least one row, and in which direction. Programmatic
+    /// steps through ``scrollRows(towardOlderContent:rows:)`` do not fire it.
+    var onTouchScroll: ((_ towardOlderContent: Bool) -> Void)?
     /// Completes the app-owned inset freeze for a responder handoff after the
     /// terminal's own keyboard frame has settled.
     var onKeyboardHandoffEnded: ((UUID, TerminalKeyboardHandoffOutcome) -> Void)?
@@ -904,9 +988,34 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
     }
 
     func receive(_ data: Data) {
+        let wasAlternateScreen = modeTracker.isAlternateScreen
+        let didTrackMouse = modeTracker.tracksMouse
         modeTracker.receive(data)
+        if modeTracker.isAlternateScreen != wasAlternateScreen
+            || modeTracker.tracksMouse != didTrackMouse
+        {
+            onAlternateScreenChange?()
+        }
         terminalSession.receive(data)
         scheduleViewportSnapshot()
+    }
+
+    /// Whether the remote application currently has the alternate screen
+    /// active (DECSET 47 / 1047 / 1049). Read by ``TerminalScrollControl``.
+    var isAlternateScreen: Bool { modeTracker.isAlternateScreen }
+
+    /// Whether the remote application asked for mouse reporting. Only then can
+    /// a scroll step reach its own history: without it, `applyScroll` falls
+    /// back to cursor keys, which a non-TUI application reads as input rather
+    /// than as scrolling. Read by ``TerminalScrollControl``. `refs #268`.
+    var remoteTracksMouse: Bool { modeTracker.tracksMouse }
+
+    /// Rows the grid currently shows, or nil until the surface has reported
+    /// real metrics. The jump control sizes its scroll steps from this: a step
+    /// larger than the viewport would move content past without it ever being
+    /// rendered, and a message in that gap would be skipped. `refs #268`.
+    var viewportRows: Int? {
+        hasTerminalGridMetrics ? terminalGridSize.rows : nil
     }
 
     /// Viewport reads are supplemental to raw-stream discovery. Ghostty
@@ -942,6 +1051,16 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
         // A keyboard that never left reports no did-show, only a frame change.
         beginKeyboardTransitionLayoutDeferral(endsOnFrameChange: true)
         raiseKeyboard()
+        // Only a first responder is handed the settle signal that ends this
+        // freeze (see `notificationSettlesOwnKeyboard`), so a claim UIKit
+        // refused leaves nothing that can end it: the grid stays frozen and
+        // `layoutSubviews` stays suppressed until the wall-clock leash fires.
+        // No keyboard is coming, so end it here on the same terms the leash
+        // would have — thawing rather than cancelling, because the surface's
+        // first grid still has to reach the Host.
+        if !isFirstResponder {
+            finishKeyboardTransitionLayout(handoffOutcome: .cancelled)
+        }
     }
 
     /// Raises the keyboard, and records that the user wants it up.
@@ -1384,6 +1503,28 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
         return true
     }
 
+    /// The grid Ghostty last measured this surface against, or `nil` before
+    /// the surface has reported one. This is the value a thawing freeze
+    /// forwards to the Host as the settled grid.
+    var measuredGrid: TerminalGridSize? {
+        guard hasTerminalGridMetrics else { return nil }
+        return TerminalGridSize(
+            columns: terminalGridSize.columns, rows: terminalGridSize.rows)
+    }
+
+    /// Where the keyboard-transition grid freeze currently stands.
+    var gridReportPhase: TerminalGridReportPhase {
+        callbackBridge.gridReportPhase
+    }
+
+    /// Observes the freeze's transitions. See ``TerminalGridReportPhase``.
+    var onGridReportPhaseChanged: ((
+        _ phase: TerminalGridReportPhase, _ forwarded: TerminalGridSize?
+    ) -> Void)? {
+        get { callbackBridge.onGridReportPhaseChanged }
+        set { callbackBridge.onGridReportPhaseChanged = newValue }
+    }
+
     /// Where Ghostty's grid currently sits inside the view, rebuilt from the
     /// metrics of the last resize.
     var gridPointMapper: TerminalGridPointMapper {
@@ -1401,9 +1542,26 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
             for: translationY,
             pointsPerRow: max(8, terminalCellSize.height))
         guard rows != 0 else { return 0 }
+        applyScroll(towardOlderContent: rows > 0, rowCount: abs(rows))
+        onTouchScroll?(rows > 0)
+        return rows
+    }
 
-        let towardOlderContent = rows > 0
-        let rowCount = abs(rows)
+    /// One scroll step of `rowCount` lines for chrome that is not a gesture.
+    /// Shares ``applyScroll(towardOlderContent:rowCount:)`` with
+    /// ``scrollTouch(translationY:)`` and leaves the touch accumulator alone.
+    func scrollRows(towardOlderContent: Bool, rows rowCount: Int) {
+        guard rowCount > 0 else { return }
+        applyScroll(towardOlderContent: towardOlderContent, rowCount: rowCount)
+    }
+
+    /// Test seam observing local Ghostty binding actions from scroll paths.
+    var didPerformBindingAction: ((String) -> Void)?
+
+    /// Remote wheel / cursor sequence when the mode tracker supplies one;
+    /// otherwise local `scroll_page_lines`. Shared by touch and the jump
+    /// control so they cannot drift. `refs #268`.
+    private func applyScroll(towardOlderContent: Bool, rowCount: Int) {
         if let sequence = modeTracker.remoteScrollSequence(
             towardOlderContent: towardOlderContent,
             columns: terminalGridSize.columns,
@@ -1412,9 +1570,10 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
             callbackBridge.scroll(sequence, rows: rowCount)
         } else {
             let localRows = towardOlderContent ? -rowCount : rowCount
-            _ = performBindingAction("scroll_page_lines:\(localRows)")
+            let action = "scroll_page_lines:\(localRows)"
+            _ = performBindingAction(action)
+            didPerformBindingAction?(action)
         }
-        return rows
     }
 
     private func installTouchScrolling() {
@@ -1599,6 +1758,12 @@ final class HeelerTerminalView: UITerminalView, TerminalByteSink {
     private func reliableInputDidBegin() {
         stopTouchScrollMomentum()
         touchScrollAccumulator.reset()
+    }
+
+    /// Stops inertial remote scroll. App-owned Esc no longer goes through
+    /// Ghostty `sendInput`, so it calls this instead of relying on that hook.
+    func noteReliableInputBegan() {
+        reliableInputDidBegin()
     }
 }
 

@@ -129,7 +129,9 @@ struct ConsoleView: View {
                                     ForEach(hosts.hosts) { host in
                                         Toggle(
                                             host.displayName,
-                                            systemImage: "server.rack",
+                                            systemImage: hostFilterStore.isEnabled(host.id)
+                                                ? "eye.fill"
+                                                : "eye.slash",
                                             isOn: Binding(
                                                 get: {
                                                     hostFilterStore.isEnabled(host.id)
@@ -192,7 +194,8 @@ struct ConsoleView: View {
                         standingFailures: console.hostStandingFailures,
                         latencies: console.hostLatencies,
                         manualReconnectInFlightHostIDs: manualReconnectInFlightHostIDs,
-                        retryConnection: { await reconnectHost($0) })
+                        retryConnection: { await reconnectHost($0) },
+                        hostFilterStore: hostFilterStore)
                 }
                 .sheet(isPresented: $isStartingAgent) {
                     // StartAgentView brings its own NavigationStack.

@@ -130,7 +130,10 @@ struct SettingsView: View {
                         "Background Keepalive",
                         systemImage: "waveform.circle",
                         isOn: keepaliveBinding)
-                    ForEach(hosts.filter { !$0.isDisabled }) { host in
+                    // All catalog Hosts; display visibility is the
+                    // per-Host toggle below (same store as the All Hosts
+                    // dropdown and the Host screen's swipe actions).
+                    ForEach(hosts) { host in
                         Toggle(
                             host.displayName,
                             systemImage: "server.rack",

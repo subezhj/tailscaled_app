@@ -73,6 +73,12 @@ struct HostListView: View {
     /// `EventsSessionStatus.reconnecting`.
     private let manualReconnectInFlightHostIDs: Set<Host.ID>
     private let retryConnection: (@MainActor @Sendable (Host.ID) async -> Void)?
+    /// Display-level per-Host Agent visibility — the same store the All
+    /// Hosts dropdown and Settings toggles drive. Disabling a Host here hides
+    /// its Agents from the Console (list + terminal switcher) without
+    /// cutting its SSH connection, so an out-and-about tailnet session and a
+    /// home LAN session can be shown and hidden independently.
+    private let hostFilterStore: AgentHostFilterStore
     @State private var removal: HostRemovalStore
     @State private var isAddingHost = false
     @State private var isScanningToPair = false
@@ -89,7 +95,8 @@ struct HostListView: View {
         standingFailures: [Host.ID: TransportError] = [:],
         latencies: [Host.ID: Duration] = [:],
         manualReconnectInFlightHostIDs: Set<Host.ID> = [],
-        retryConnection: (@MainActor @Sendable (Host.ID) async -> Void)? = nil
+        retryConnection: (@MainActor @Sendable (Host.ID) async -> Void)? = nil,
+        hostFilterStore: AgentHostFilterStore = AgentHostFilterStore()
     ) {
         self.store = store
         self.initialHostID = initialHostID
@@ -98,6 +105,7 @@ struct HostListView: View {
         self.latencies = latencies
         self.manualReconnectInFlightHostIDs = manualReconnectInFlightHostIDs
         self.retryConnection = retryConnection
+        self.hostFilterStore = hostFilterStore
         _removal = State(initialValue: HostRemovalStore(store: store))
     }
 
@@ -132,8 +140,10 @@ struct HostListView: View {
                     } description: {
                         Text(
                             showsDisabled
-                                ? "All Hosts are disabled. Swipe right to re-enable, or use Show Disabled."
-                                : "Add a machine that runs herdr to get started.")
+                                ? "No Hosts are saved yet. Add one to get started."
+                                : "Every Host is hidden from the Console. "
+                                    + "Show them with the eye button, or swipe "
+                                    + "a Host row to unhide it.")
                     } actions: {
                         // Scan to Pair is the primary add-Host action; the
                         // manual form is the fallback (ADR 0007).
@@ -153,24 +163,31 @@ struct HostListView: View {
                                     standingFailure: standingFailures[host.id],
                                     latency: latencies[host.id])
                             }
-                            .disabled(host.isDisabled)
-                            .opacity(host.isDisabled ? 0.4 : 1)
+                            // Display-level visibility, not connection: a
+                            // Host hidden from the Console still keeps its SSH
+                            // connection (out tailnet / home LAN show-hide).
+                            .opacity(hostFilterStore.isEnabled(host.id) ? 1 : 0.4)
                             .swipeActions(edge: .trailing) {
                                 Button(role: .destructive) {
                                     removal.requestRemoval([host.id])
                                 } label: {
                                     Label("Delete", systemImage: "trash")
                                 }
-                                if host.isDisabled {
-                                    Button("Enable") {
-                                        try? store.setDisabled(host.id, false)
-                                    }
-                                    .tint(.green)
-                                } else {
-                                    Button("Disable", systemImage: "eye.slash") {
-                                        try? store.setDisabled(host.id, true)
+                                if hostFilterStore.isEnabled(host.id) {
+                                    // Hide from the Console; connection stays.
+                                    Button("Hide", systemImage: "eye.slash") {
+                                        withAnimation(.snappy) {
+                                            hostFilterStore.setEnabled(false, for: host.id)
+                                        }
                                     }
                                     .tint(.orange)
+                                } else {
+                                    Button("Show", systemImage: "eye") {
+                                        withAnimation(.snappy) {
+                                            hostFilterStore.setEnabled(true, for: host.id)
+                                        }
+                                    }
+                                    .tint(.green)
                                 }
                             }
                         }
@@ -191,7 +208,7 @@ struct HostListView: View {
                 }
                 ToolbarItem(placement: .topBarLeading) {
                     Button {
-                        showsDisabled.toggle()
+                        withAnimation(.snappy) { showsDisabled.toggle() }
                     } label: {
                         Image(
                             systemName: showsDisabled
@@ -199,7 +216,7 @@ struct HostListView: View {
                                 : "eye.slash")
                     }
                     .accessibilityLabel(
-                        showsDisabled ? "Hide disabled Hosts" : "Show disabled Hosts")
+                        showsDisabled ? "Show all Hosts" : "Show only visible Hosts")
                 }
             }
             .navigationDestination(for: Host.ID.self) { id in
@@ -293,8 +310,13 @@ struct HostListView: View {
 
     /// Hosts shown in the list: all when "Show Disabled" is on, otherwise
     /// only enabled ones.
+    /// All catalog Hosts, filtered by the toolbar eye toggle: default shows
+    /// every Host the Console displays (hostFilterStore-enabled); toggled
+    /// shows even hidden ones so their swipe-action Show is reachable. This
+    /// is display visibility, not connection-level `Host.isDisabled`.
     private var visibleHosts: [Host] {
-        showsDisabled ? store.hosts : store.enabledHosts
+        if showsDisabled { return store.hosts }
+        return hostFilterStore.enabledHosts(from: store.hosts)
     }
 
     private func retryAction(

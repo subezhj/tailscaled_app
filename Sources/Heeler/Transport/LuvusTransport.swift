@@ -9,15 +9,14 @@ import Foundation
 /// this transport reuses the Heeler SSH connection (jump hosts, host-key
 /// TOFU, authentication) and only swaps the request transport.
 ///
-/// **Scope**: this first slice implements `ping()` only (via
-/// `uhp.capabilities`, a parameterless self-describing call). The remaining
-/// `Transport` methods inherit the protocol's honest "unavailable" defaults —
-/// a luvus Host connects and pings, and the Console surfaces that the
-/// backend's full method set is not wired up yet instead of fabricating
-/// responses from guessed field shapes. Mapping the rest is a per-method
-/// exercise against luvus's published UHP schema (the same way the herdr
-/// methods were mapped from `herdr api schema`), and lives entirely in this
-/// file.
+/// **Scope**: this slice implements `ping()` only (via `uhp.capabilities`, a
+/// parameterless self-describing call). Every other `Transport` method
+/// inherits the protocol's honest "unavailable" defaults — a luvus Host
+/// connects and pings, and the Console surfaces that the backend's full
+/// method set is not wired up yet instead of fabricating responses from
+/// guessed field shapes. Mapping the rest is a per-method exercise against
+/// luvus's published UHP schema (the same way the herdr methods were mapped
+/// from `herdr api schema`), and lives entirely in this file.
 ///
 /// Kept deliberately thin and decoupled: upstream merges that touch
 /// `HeelerSSHTransport` or `Transport` do not collide with this file.
@@ -79,6 +78,26 @@ struct LuvusTransport: Transport {
             detail: "luvus agent key control is not wired up yet.")
     }
 
+    func closePane(_ params: PaneTarget) async throws {
+        throw TransportError.channelFailed(
+            detail: "luvus pane control is not wired up yet.")
+    }
+
+    func renameAgent(_ params: AgentRenameParams) async throws {
+        throw TransportError.channelFailed(
+            detail: "luvus agent rename is not wired up yet.")
+    }
+
+    func renameWorkspace(_ params: WorkspaceRenameParams) async throws {
+        throw TransportError.channelFailed(
+            detail: "luvus workspace rename is not wired up yet.")
+    }
+
+    func startAgent(_ request: AgentLaunchRequest) async throws -> Agent {
+        throw TransportError.channelFailed(
+            detail: "luvus agent launches are not wired up yet.")
+    }
+
     func startAgentInNewWorktree(
         _ request: AgentLaunchRequest, worktree: WorktreeSpec
     ) async throws -> Agent {
@@ -93,18 +112,28 @@ struct LuvusTransport: Transport {
             detail: "luvus workspace launches are not wired up yet.")
     }
 
-    func closePane(_ params: PaneTarget) async throws {
+    func listAgents() async throws -> [Agent] {
         throw TransportError.channelFailed(
-            detail: "luvus pane control is not wired up yet.")
+            detail: "luvus agent listing is not wired up yet.")
     }
 
-    func renameAgent(_ params: AgentRenameParams) async throws {
+    func sessionSnapshot() async throws -> SessionSnapshot {
         throw TransportError.channelFailed(
-            detail: "luvus agent rename is not wired up yet.")
+            detail: "luvus session snapshot is not wired up yet.")
     }
 
-    func renameWorkspace(_ params: WorkspaceRenameParams) async throws {
+    func readPane(_ params: PaneReadParams) async throws -> PaneReadResult {
         throw TransportError.channelFailed(
-            detail: "luvus workspace rename is not wired up yet.")
+            detail: "luvus pane reads are not wired up yet.")
+    }
+
+    func readAgent(_ params: AgentReadParams) async throws -> PaneReadResult {
+        throw TransportError.channelFailed(
+            detail: "luvus agent reads are not wired up yet.")
+    }
+
+    func promptAgent(_ params: AgentPromptParams) async throws -> Agent {
+        throw TransportError.channelFailed(
+            detail: "luvus prompting is not wired up yet.")
     }
 }

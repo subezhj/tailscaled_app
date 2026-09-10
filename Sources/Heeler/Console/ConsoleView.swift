@@ -40,6 +40,8 @@ struct ConsoleView: View {
     @State private var hostFilter: Host.ID?
     /// Owns flat/grouped mode and per-Host collapsed state (#245).
     @State private var listPresentation = ConsoleListPresentationStore()
+    /// Per-Host Agent visibility (enable/disable Hosts from the tab bar).
+    @State private var hostFilterStore = AgentHostFilterStore()
     /// Outlives the detail column's rebuilds, which is the whole point: it
     /// carries the raised keyboard from one Attach screen to the next.
     @State private var keyboardHandoff = TerminalKeyboardHandoff()
@@ -58,6 +60,9 @@ struct ConsoleView: View {
     /// transition so the user is not nagged repeatedly.
     @State private var vpnBlockedHostID: Host.ID?
     @State private var vpnAlertAcknowledged: Set<Host.ID> = []
+    /// Hosts whose DERP-relay hint the user dismissed this session; the hint
+    /// re-appears once the peer returns to direct (or the app relaunches).
+    @State private var relayHintDismissed: Set<Host.ID> = []
 
     var body: some View {
         // A split view instead of a plain stack for the iPad's sake: regular
@@ -67,6 +72,12 @@ struct ConsoleView: View {
         // projection of it, so notification deep links keep working.
         NavigationSplitView {
             content
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    hostFilterTabBar
+                }
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    derpRelayHint
+                }
                 .navigationTitle("Agents")
                 .navigationSplitViewColumnWidth(min: 320, ideal: 380)
                 .toolbar {
@@ -172,7 +183,8 @@ struct ConsoleView: View {
                         tailnet: tailnet,
                         audioKeeper: audioKeeper,
                         console: console,
-                        hosts: hosts.hosts)
+                        hosts: hosts.hosts,
+                        hostFilterStore: hostFilterStore)
                 }
         } detail: {
             detail
@@ -274,6 +286,144 @@ struct ConsoleView: View {
         return address.lowercased().hasPrefix("fd7a:115c:a1e0")
     }
 
+    /// The Host-category strip above the Agent list: an All-Hosts chip plus
+    /// one chip per enabled Host. Tapping a Host chip narrows the list to
+    /// that Host; long-pressing toggles the Host enabled/disabled (disabled
+    /// chips render greyed out and their Agents disappear everywhere). A
+    /// disabled Host's chip stays visible so it can be re-enabled without
+    /// visiting Settings.
+    private var hostFilterTabBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                hostFilterChip(
+                    title: "All",
+                    systemImage: "square.stack.3d.up",
+                    selected: hostFilter == nil) {
+                        hostFilter = nil
+                    }
+                ForEach(hosts.enabledHosts) { host in
+                    let enabled = hostFilterStore.isEnabled(host.id)
+                    hostFilterChip(
+                        title: host.displayName,
+                        systemImage: enabled
+                            ? (hostFilter == host.id
+                                ? "server.rack.fill" : "server.rack")
+                            : "server.rack",
+                        selected: hostFilter == host.id,
+                        disabled: !enabled,
+                        contextMenu: {
+                            Button(enabled ? "Disable Host" : "Enable Host") {
+                                withAnimation(.snappy) {
+                                    hostFilterStore.toggle(host.id)
+                                    if hostFilter == host.id {
+                                        hostFilter = nil
+                                    }
+                                }
+                            }
+                            Button("Host Settings", systemImage: "slider.horizontal.3") {
+                                presentHosts(host.id)
+                            }
+                        },
+                        action: {
+                            hostFilter = enabled ? host.id : nil
+                        })
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+        .background(
+            Color(uiColor: .systemBackground)
+                .opacity(0.92))
+    }
+
+    private func hostFilterChip(
+        title: String,
+        systemImage: String,
+        selected: Bool,
+        disabled: Bool = false,
+        contextMenu: @escaping () -> some View = { EmptyView() },
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Image(systemName: systemImage)
+                Text(title)
+                    .lineLimit(1)
+            }
+            .font(.footnote.weight(.medium))
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                Capsule()
+                    .fill(selected
+                        ? Color.accentColor.opacity(0.9)
+                        : Color(uiColor: .secondarySystemBackground)))
+            .foregroundStyle(
+                disabled ? .secondary
+                    : selected ? .white : .primary)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled && !selected)
+        .contextMenu { contextMenu() }
+    }
+
+    /// A banner shown when a tailnet Host's peer is reachable only through a
+    /// DERP relay (slow) rather than a direct P2P path (fast). This is not an
+    /// error — the connection works — just a hint that switching to a network
+    /// where NAT traversal succeeds (typically the same LAN as the Host, or
+    /// a network without CGNAT interference) would be noticeably faster.
+    /// Hidden while every tailnet peer is direct or unknown; visible only
+    /// while at least one enabled Host resolves to a relayed peer.
+    private var derpRelayHint: some View {
+        Group {
+            if let hint = relayedHostHint {
+                HStack(spacing: 8) {
+                    Image(systemName: "tortoise.fill")
+                        .foregroundStyle(.orange)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("\(hint.hostName) via DERP relay")
+                            .font(.footnote.weight(.medium))
+                        Text(
+                            "Direct P2P unavailable — connect to the same "
+                                + "network as the Host for a faster link.")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer(minLength: 0)
+                    Button {
+                        relayHintDismissed.insert(hint.hostID)
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.tertiary)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss relay hint")
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    Color(uiColor: .secondarySystemBackground)
+                        .opacity(0.9))
+            }
+        }
+        .animation(.snappy, value: relayedHostHint?.hostID)
+    }
+
+    /// The first enabled Host whose peer rides a DERP relay, unless the user
+    /// dismissed the hint for it this session. Consumes the tailnet health
+    /// map published by the node controller; nil when none is relayed.
+    private var relayedHostHint: (hostID: Host.ID, hostName: String)? {
+        for host in hosts.enabledHosts {
+            guard Self.isTailnetAddress(host.address) else { continue }
+            guard !relayHintDismissed.contains(host.id) else { continue }
+            if tailnet.isPeerRelayed(address: host.address) == true {
+                return (host.id, host.displayName)
+            }
+        }
+        return nil
+    }
+
     private static func isFailed(_ status: EventsSessionStatus?) -> Bool {
         guard let status, case .failed = status else { return false }
         return true
@@ -328,7 +478,8 @@ struct ConsoleView: View {
                             && console.agents.contains(where: { $0.id == id })
                     },
                     onSwitch: { notificationRouter.path = [$0] },
-                    onClosed: { notificationRouter.path = [] }
+                    onClosed: { notificationRouter.path = [] },
+                    hostFilterStore: hostFilterStore
                 )
                 // Selecting another Agent must tear down the previous terminal
                 // pipeline; without the explicit identity the detail column
@@ -510,7 +661,7 @@ struct ConsoleView: View {
 
     private var hostSections: [ConsoleHostSection] {
         listPresentation.sections(
-            hosts: hosts.enabledHosts,
+            hosts: hostFilterStore.enabledHosts(from: hosts.enabledHosts),
             console: console,
             filteredHostID: hostFilter)
     }
@@ -532,8 +683,13 @@ struct ConsoleView: View {
     }
 
     private var filteredAgents: [ConsoleAgent] {
-        guard let hostFilter else { return console.agents }
-        return console.agents.filter { $0.hostID == hostFilter }
+        var agents: [ConsoleAgent]
+        if let hostFilter {
+            agents = console.agents.filter { $0.hostID == hostFilter }
+        } else {
+            agents = console.agents
+        }
+        return hostFilterStore.enabledAgents(from: agents)
     }
 
     /// Host issues shown in the list: all of them, or the filtered Host's

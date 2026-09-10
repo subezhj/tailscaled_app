@@ -68,13 +68,32 @@ struct HostFormView: View {
                 }
 
                 Section {
-                    TextField("Session name", text: $draft.sessionName)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.never)
+                    Picker("Backend", selection: $draft.backend) {
+                        ForEach(Host.Backend.allCases) { backend in
+                            Text(backend.title).tag(backend)
+                        }
+                    }
                 } header: {
-                    Text("herdr Session")
+                    Text("Agent Backend")
                 } footer: {
-                    Text("Leave blank for the default herdr session.")
+                    Text(
+                        draft.backend == .herdr
+                            ? "herdr runs its JSON API over SSH to its Unix "
+                                + "socket — the default."
+                            : "luvus speaks UHP over SSH through `luvus uhp "
+                                + "proxy`; the Host must have luvus installed.")
+                }
+
+                if draft.backend == .herdr {
+                    Section {
+                        TextField("Session name", text: $draft.sessionName)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.never)
+                    } header: {
+                        Text("herdr Session")
+                    } footer: {
+                        Text("Leave blank for the default herdr session.")
+                    }
                 }
 
                 Section {

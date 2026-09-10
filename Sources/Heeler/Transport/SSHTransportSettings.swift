@@ -71,6 +71,9 @@ struct SSHTransportSettings: Sendable {
     /// TOFU host key policy (#2): the trusted-fingerprint store plus the
     /// first-connect confirmation the UI implements.
     var hostKeyPolicy: HostKeyPolicy
+    /// Which agent-control backend the Host speaks. herdr reaches its JSON
+    /// API through a remote Unix socket; luvus speaks UHP over `uhp proxy`.
+    var backend: Host.Backend = .herdr
     /// Which herdr socket to reach on the Host.
     var socket: HerdrSocketLocation
     /// Optional Jump Host. When set, the Transport authenticates against the

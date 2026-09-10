@@ -15,6 +15,9 @@ struct AgentDetailView: View {
     private let isOnStage: () -> Bool
     private let onSwitch: (ConsoleAgent.ID) -> Void
     private let onClosed: () -> Void
+    /// Per-Host Agent visibility; the terminal switcher filters its chips
+    /// through this so disabled Hosts' Agents disappear from the strip too.
+    private let hostFilterStore: AgentHostFilterStore
     @State private var composer: AgentComposerStore
     @State private var attach: AgentAttachStore
     @State private var openTerminal: AgentOpenTerminalStore
@@ -33,7 +36,8 @@ struct AgentDetailView: View {
         onClosed: @escaping () -> Void,
         composerStore: AgentComposerStore? = nil,
         attachStore: AgentAttachStore? = nil,
-        openTerminalStore: AgentOpenTerminalStore? = nil
+        openTerminalStore: AgentOpenTerminalStore? = nil,
+        hostFilterStore: AgentHostFilterStore = AgentHostFilterStore()
     ) {
         self.agent = agent
         self.console = console
@@ -46,6 +50,7 @@ struct AgentDetailView: View {
         self.isOnStage = isOnStage
         self.onSwitch = onSwitch
         self.onClosed = onClosed
+        self.hostFilterStore = hostFilterStore
         let composer = composerStore ?? console.composerStore(for: agent)
         _composer = State(initialValue: composer)
         let attach = attachStore
@@ -129,7 +134,8 @@ struct AgentDetailView: View {
                     isOpeningTerminal: openTerminal.isOpening,
                     openTerminal: { openTerminal.open() },
                     composer: composer,
-                    attachStore: attach)
+                    attachStore: attach,
+                    hostFilterStore: hostFilterStore)
                 .id(openTerminal.destination)
             }
         }

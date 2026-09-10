@@ -609,6 +609,55 @@ actor HeelerSSHTransport: Transport {
         try await runHostCommand(ClaudeTranscript.latestSessionCommand())
     }
 
+    // MARK: - Luvus backend (UHP over `uhp proxy`)
+
+    /// One luvus UHP request/response over the same SSH connection: an exec
+    /// channel runs `luvus uhp proxy`, stdin carries exactly one NDJSON
+    /// request line, stdout returns exactly one NDJSON response line. The
+    /// wire envelope matches herdr's (`{"id","method","params"}` →
+    /// `{"id","result"}`/`{"id","error"}`), so `HerdrWire`'s encoding and
+    /// decoding are shared; only the transport differs (exec vs stream-local
+    /// socket). Exposed internal so `LuvusTransport` can drive it without
+    /// duplicating the SSH connection lifecycle.
+    func performLuvusRequest<P: Encodable & Sendable, R: Decodable & Sendable>(
+        method: String,
+        params: P,
+        decoding type: R.Type
+    ) async throws -> R {
+        guard connected else {
+            throw TransportError.sshUnreachable(
+                detail: "The SSH connection is closed.")
+        }
+        let requestID = UUID().uuidString
+        let line = try HerdrWire.requestLine(
+            id: requestID,
+            method: method,
+            params: params)
+        let responseData = try await withRequestDeadline {
+            try await self.channelAdmission.withChannel(.ordinarySession) {
+                do {
+                    // Generic sh wrap (not `wrappingBareHerdr`, which only
+                    // matches a `herdr` command word): luvus lives in the same
+                    // extra-PATH locations as herdr and must see them too.
+                    return try await self.connection.executeResponseLine(
+                        Self.cLocaleCommand(
+                            HerdrHostPath.shWrappedCommand("luvus uhp proxy")),
+                        input: Data(line.utf8),
+                        maximumResponseBytes: Self.maximumResponseBytes,
+                        timeout: self.requestTimeout)
+                } catch let error as SSHError {
+                    throw await self.mapOperationError(error)
+                } catch {
+                    throw error
+                }
+            }
+        }
+        return try HerdrWire.decodeResult(
+            type,
+            fromResponseLine: responseData,
+            requestID: requestID)
+    }
+
     func listAgents() async throws -> [Agent] {
         try await request(method: "agent.list", decoding: AgentListResponse.self)
             .agents.map(Agent.init)

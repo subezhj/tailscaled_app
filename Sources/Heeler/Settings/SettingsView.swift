@@ -56,6 +56,9 @@ struct SettingsView: View {
     let audioKeeper: AudioSessionKeeper
     let console: ConsoleStore
     let hosts: [Host]
+    /// Per-Host Agent visibility (on/off switches in this sheet, and the
+    /// Console's Host tab bar share the same store).
+    let hostFilterStore: AgentHostFilterStore
 
     static let agentListDestination = SettingsAgentListDestination.fields
 
@@ -127,6 +130,14 @@ struct SettingsView: View {
                         "Background Keepalive",
                         systemImage: "waveform.circle",
                         isOn: keepaliveBinding)
+                    ForEach(hosts.filter { !$0.isDisabled }) { host in
+                        Toggle(
+                            host.displayName,
+                            systemImage: "server.rack",
+                            isOn: Binding(
+                                get: { hostFilterStore.isEnabled(host.id) },
+                                set: { hostFilterStore.setEnabled($0, for: host.id) }))
+                    }
                 } header: {
                     Text("Connections")
                 } footer: {

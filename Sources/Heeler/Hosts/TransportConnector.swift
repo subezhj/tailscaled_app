@@ -7,13 +7,19 @@ protocol TransportConnector: Sendable {
     func connect(settings: SSHTransportSettings) async throws -> any Transport
 }
 
-/// The one production SSH backend: libssh2 reaching the herdr socket over
-/// direct-streamlocal (ADR 0011). There is deliberately no second path — a
-/// Host that denies stream-local forwarding is a server policy to fix, not a
-/// case to fall back from.
+/// The production SSH backend: libssh2 reaching the herdr socket over
+/// direct-streamlocal (ADR 0011), or luvus's UHP over `uhp proxy` when the
+/// Host's backend is luvus. A Host that denies stream-local forwarding is a
+/// server policy to fix, not a case to fall back from.
 struct SSHTransportConnector: TransportConnector {
     func connect(settings: SSHTransportSettings) async throws -> any Transport {
-        try await HeelerSSHTransport.connect(settings: settings)
+        let ssh = try await HeelerSSHTransport.connect(settings: settings)
+        switch settings.backend {
+        case .herdr:
+            return ssh
+        case .luvus:
+            return LuvusTransport(ssh: ssh)
+        }
     }
 }
 
@@ -27,6 +33,7 @@ extension SSHTransportSettings {
             username: host.username,
             credentials: credentials,
             hostKeyPolicy: hostKeyPolicy,
+            backend: host.backend,
             socket: host.socketLocation,
             // Both hops use the Host's resolved credential. Device Key is the
             // normal case; password Hosts require the same password at both hops.

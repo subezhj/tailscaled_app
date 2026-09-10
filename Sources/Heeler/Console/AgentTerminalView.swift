@@ -173,6 +173,10 @@ struct AgentTerminalView: View {
     private let openTerminal: () -> Void
     private let composer: AgentComposerStore
     private let interactionProbe: WeakAgentTerminalInteractionProbe?
+    /// Per-Host Agent visibility; the switcher strip filters its chips
+    /// through this so a disabled Host's Agents disappear from the terminal
+    /// switcher too (not just the sidebar list).
+    private let hostFilterStore: AgentHostFilterStore
     @State private var attach: AgentAttachStore
     /// Nil for agent kinds without a skills source catalog; the Keys
     /// keyboard hides the Skills tab in that case.
@@ -257,7 +261,8 @@ struct AgentTerminalView: View {
         openTerminal: @escaping () -> Void = {},
         composer: AgentComposerStore,
         attachStore: AgentAttachStore? = nil,
-        interactionProbe: AgentTerminalInteractionProbe? = nil
+        interactionProbe: AgentTerminalInteractionProbe? = nil,
+        hostFilterStore: AgentHostFilterStore = AgentHostFilterStore()
     ) {
         self.agent = agent
         self.console = console
@@ -275,6 +280,7 @@ struct AgentTerminalView: View {
         self.openTerminal = openTerminal
         self.composer = composer
         self.interactionProbe = interactionProbe.map(WeakAgentTerminalInteractionProbe.init)
+        self.hostFilterStore = hostFilterStore
         _attach = State(
             initialValue: attachStore ?? AgentAttachStore(
                 target: agent.agent.paneID,
@@ -676,8 +682,9 @@ struct AgentTerminalView: View {
     }
 
     private var agentSwitcher: TerminalAgentSwitcher {
-        TerminalAgentSwitcher(
-            items: console.agents.map {
+        let agents = hostFilterStore.enabledAgents(from: console.agents)
+        return TerminalAgentSwitcher(
+            items: agents.map {
                 TerminalAgentSwitcherItem(
                     agent: $0, pins: console.pins, layout: console.rowLayout(for: $0.hostID))
             },

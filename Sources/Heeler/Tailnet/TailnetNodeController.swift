@@ -41,6 +41,14 @@ final class TailnetNodeController: ObservableObject {
     /// The view presents an `ASWebAuthenticationSession` when this is set.
     @Published private(set) var pendingLoginURL: URL?
 
+    /// Per-peer connection health, keyed by the peer's hostname(s) and tailnet
+    /// IP(s) as reported by `statusJSON`. The health monitor fills this on a
+    /// timer while the node runs; the Console's DERP-relay hint reads it.
+    @Published private(set) var peerHealth: [String: TailnetPeerHealth] = [:]
+    /// The peer health monitor's last error, surfaced in the Tailnet settings
+    /// pane for diagnosis; nil while healthy or before the first sample.
+    @Published private(set) var healthCheckError: String?
+
     /// True when the node is running and SSH should ride the tailnet.
     var isActive: Bool {
         if case .running = state { return true }
@@ -54,6 +62,21 @@ final class TailnetNodeController: ObservableObject {
     private let logger = TailnetLogger()
     /// When the last proxy-failure rebuild happened, for throttling.
     private var lastProxyRebuildAt: ContinuousClock.Instant?
+    /// When the health monitor last forced a re-dial, for throttling.
+    private var lastHealthRedialAt: ContinuousClock.Instant?
+    /// The running health-poll task; nil while the node is not verified.
+    private var healthTask: Task<Void, Never>?
+
+    /// How often the health monitor samples peer status. Direct/DERP and
+    /// online/stale transitions land within one interval; the interval is
+    /// long enough that the poll is not the dominant battery draw.
+    private static let healthCheckInterval: Duration = .seconds(15)
+    /// Minimum gap between health-triggered re-dials, longer than the poll
+    /// interval so a genuinely dead peer cannot churn the node.
+    private static let healthRedialThrottle: Duration = .seconds(60)
+    /// A peer whose last WireGuard handshake is older than this is treated
+    /// as stale even when the status still says online.
+    private static let staleHandshakeWindow: TimeInterval = 90
 
     /// Watches for network path changes (WiFi↔cellular). iOS tears down every
     /// existing connection on such a switch, including the node's control/DERP
@@ -219,6 +242,7 @@ final class TailnetNodeController: ObservableObject {
             case .NeedsLogin:
                 self.state = .needsLogin
                 isVerified = false
+                stopHealthMonitor()
                 // Node is not usable yet — don't route SSH through it.
                 SocketConnector.socks5Proxy = nil
                 isSocksProxyActive = false
@@ -235,6 +259,7 @@ final class TailnetNodeController: ObservableObject {
                     activateProxy(loopback)
                 }
                 refreshRunningState()
+                startHealthMonitor()
             case .Starting, .NoState, .Stopped:
                 break
             @unknown default:
@@ -269,6 +294,118 @@ final class TailnetNodeController: ObservableObject {
         }
     }
 
+    // MARK: - Peer health monitor
+
+    /// Starts the periodic peer-health sampler. Idempotent; a running node
+    /// that reaches Running again (e.g. after a rebuild) simply keeps the
+    /// existing loop. The loop samples `statusJSON`, decodes per-peer
+    /// direct/relay + online/stale health, publishes it for the DERP-relay
+    /// hint, and re-dials the node when a peer looks dead but the node still
+    /// claims Running — the gap a proxy-failure rebuild cannot see because
+    /// nothing tried to dial through the proxy.
+    private func startHealthMonitor() {
+        guard healthTask == nil else { return }
+        healthTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.samplePeerHealth()
+                try? await Task.sleep(for: Self.healthCheckInterval)
+            }
+        }
+    }
+
+    private func stopHealthMonitor() {
+        healthTask?.cancel()
+        healthTask = nil
+        peerHealth = [:]
+        healthCheckError = nil
+    }
+
+    /// One sampling pass: fetch status, decode peers, publish health, and
+    /// trigger a throttled re-dial if any peer is unhealthy while the node
+    /// claims Running.
+    private func samplePeerHealth() async {
+        guard let node, isVerified else { return }
+        do {
+            let data = try await node.statusJSON()
+            let status = try JSONDecoder().decode(Ipn.Status.self, from: data)
+            let health = Self.peerHealth(from: status)
+            guard !Task.isCancelled else { return }
+            peerHealth = health
+            healthCheckError = nil
+            // A peer that is offline or whose handshake is stale means the
+            // tailnet path died even though the node still says Running.
+            // Nothing else will re-dial in that state (the proxy is set, so
+            // dials fail only when a Host actually tries to connect) — so
+            // force a control-plane/DERP re-dial, throttled.
+            if health.values.contains(where: { !$0.isHealthy }) {
+                healthTriggeredRedial()
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
+            healthCheckError = error.localizedDescription
+        }
+    }
+
+    /// Decodes the raw status into the per-key health dictionary. Keys are
+    /// every hostname and tailnet IP a peer carries, so a Host configured
+    /// with `100.x`, `magic-name`, or `magic-name.tailnet.ts.net` all find
+    /// the same peer.
+    static func peerHealth(from status: TailscaleKit.Ipn.Status) -> [String: TailnetPeerHealth] {
+        var result: [String: TailnetPeerHealth] = [:]
+        guard let peers = status.Peer else { return result }
+        for peer in peers.values {
+            let health = TailnetPeerHealth(
+                online: peer.Online,
+                relay: peer.Relay,
+                lastHandshake: peer.LastHandshake.isGoZeroTime
+                    ? nil : peer.LastHandshake)
+            var keys: [String] = []
+            if !peer.DNSName.isEmpty {
+                keys.append(peer.DNSName)
+                // MagicDNS short name: `host.tailnet.ts.net` → `host`.
+                if let dot = peer.DNSName.firstIndex(of: ".") {
+                    keys.append(String(peer.DNSName[..<dot]))
+                }
+            }
+            if let ips = peer.TailscaleIPs {
+                keys.append(contentsOf: ips)
+            }
+            for key in keys {
+                result[key.lowercased()] = health
+            }
+        }
+        return result
+    }
+
+    /// Throttled re-dial when the health monitor finds a dead/stale peer.
+    private func healthTriggeredRedial() {
+        let now = ContinuousClock.now
+        if let last = lastHealthRedialAt,
+            now - last < Self.healthRedialThrottle
+        {
+            return
+        }
+        lastHealthRedialAt = now
+        guard let node else { return }
+        logger.log("Tailnet: health monitor found an unhealthy peer; re-dialing")
+        Task {
+            try? await node.up()
+        }
+    }
+
+    /// Whether a peer is currently relayed through DERP, for the Console's
+    /// slow-path hint. Mirrors `peerHealth` lookups by the Host's address.
+    /// Returns nil when the peer is not (yet) in the health map.
+    func isPeerRelayed(address: String) -> Bool? {
+        peerHealth[address.lowercased()]?.isRelayed
+    }
+
+    /// Whether the peer behind a Host address looks dead (offline or stale
+    /// handshake), for diagnostics.
+    func isPeerHealthy(address: String) -> Bool? {
+        peerHealth[address.lowercased()]?.isHealthy
+    }
+
     func stop() {
         guard let node else { return }
         // Point SSH back at direct dialing first.
@@ -277,6 +414,7 @@ final class TailnetNodeController: ObservableObject {
         isSocksProxyActive = false
         loopback = nil
         pendingLoginURL = nil
+        stopHealthMonitor()
         let cancelProcessor = processor
         processor = nil
         localAPI = nil

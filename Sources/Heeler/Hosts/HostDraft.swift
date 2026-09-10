@@ -12,6 +12,8 @@ struct HostDraft: Equatable, Sendable {
     /// Blank means "keep the stored password" when editing.
     var password = ""
     var sessionName = ""
+    /// Which agent-control backend this Host speaks (herdr default).
+    var backend: Host.Backend = .herdr
     /// Blank means a direct connection. When set, Address/Port above are
     /// resolved from the Jump Host, not from this device.
     var jumpAddress = ""
@@ -32,6 +34,7 @@ struct HostDraft: Equatable, Sendable {
         username = host.username
         authMethod = host.authMethod
         sessionName = host.sessionName
+        backend = host.backend
         jumpAddress = host.jumpAddress
         jumpPort = String(host.jumpPort)
         jumpUsername = host.jumpUsername
@@ -86,6 +89,7 @@ struct HostDraft: Equatable, Sendable {
             username: username.trimmingCharacters(in: .whitespaces),
             authMethod: authMethod,
             sessionName: sessionName.trimmingCharacters(in: .whitespaces),
+            backend: backend,
             jumpAddress: jumpAddress.trimmingCharacters(in: .whitespaces),
             jumpPort: jumpPortNumber ?? 22,
             jumpUsername: jumpUsername.trimmingCharacters(in: .whitespaces),

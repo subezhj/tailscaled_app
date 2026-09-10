@@ -34,13 +34,43 @@ struct Host: Identifiable, Codable, Hashable, Sendable {
     /// When true the Host is hidden from the console and cannot be connected.
     /// The record (and its saved password) is kept so it can be re-enabled.
     var isDisabled: Bool
+    /// Which agent-control backend this Host runs: herdr (the default, its
+    /// JSON API over a remote Unix socket) or luvus (its UHP protocol over
+    /// `luvus uhp proxy`). Absent on Hosts saved before this field: herdr.
+    var backend: Backend
+
+    /// The agent-control backend a Host speaks.
+    enum Backend: String, Codable, Sendable, CaseIterable, Identifiable {
+        case herdr
+        case luvus
+
+        var id: Self { self }
+
+        /// Settings picker label.
+        var title: String {
+            switch self {
+            case .herdr: "herdr"
+            case .luvus: "luvus"
+            }
+        }
+
+        /// One-line description for the Host form.
+        var detail: String {
+            switch self {
+            case .herdr:
+                "herdr's JSON API over SSH to its Unix socket"
+            case .luvus:
+                "luvus's UHP protocol over SSH (`luvus uhp proxy`)"
+            }
+        }
+    }
 
     /// `socatPath` is deliberately absent: Hosts serialized before ADR 0011
     /// still carry it on disk, and leaving it out of the keys both ignores it
     /// on decode and drops it on the Host's next save.
     private enum CodingKeys: String, CodingKey {
         case id, name, address, port, username, authMethod, sessionName
-        case jumpAddress, jumpPort, jumpUsername, isDisabled
+        case jumpAddress, jumpPort, jumpUsername, isDisabled, backend
     }
 
     /// Whether this Host is reached through a Jump Host.
@@ -65,7 +95,8 @@ struct Host: Identifiable, Codable, Hashable, Sendable {
         jumpAddress: String = "",
         jumpPort: Int = 22,
         jumpUsername: String = "",
-        isDisabled: Bool = false
+        isDisabled: Bool = false,
+        backend: Backend = .herdr
     ) {
         self.id = id
         self.name = name
@@ -78,6 +109,7 @@ struct Host: Identifiable, Codable, Hashable, Sendable {
         self.jumpPort = jumpPort
         self.jumpUsername = jumpUsername
         self.isDisabled = isDisabled
+        self.backend = backend
     }
 
     init(from decoder: any Decoder) throws {
@@ -96,6 +128,8 @@ struct Host: Identifiable, Codable, Hashable, Sendable {
         jumpUsername = try container.decodeIfPresent(String.self, forKey: .jumpUsername) ?? ""
         // Absent in Hosts saved before disable support: enabled by default.
         isDisabled = try container.decodeIfPresent(Bool.self, forKey: .isDisabled) ?? false
+        // Absent in Hosts saved before backend support: herdr.
+        backend = try container.decodeIfPresent(Backend.self, forKey: .backend) ?? .herdr
 
         let trimmedSessionName = sessionName.trimmingCharacters(in: .whitespaces)
         guard trimmedSessionName.isEmpty || HerdrSessionName.isValid(trimmedSessionName) else {

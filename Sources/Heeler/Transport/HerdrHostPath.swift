@@ -74,6 +74,14 @@ enum HerdrHostPath: Sendable {
     /// such as `herdr --config '/x/y' session list` still gets the PATH fix.
     static func wrappingBareHerdr(_ command: String) -> String {
         guard isBareHerdrCommand(command) else { return command }
+        return shWrappedCommand(command)
+    }
+
+    /// Wraps any command (not just `herdr`) in `/bin/sh` with the extra
+    /// prefixes exported — the generic form of ``wrappingBareHerdr`` for a
+    /// bare command word that is not `herdr` (e.g. luvus's `uhp proxy`). The
+    /// wrap runs under POSIX sh, unchanged behavior for injectable commands.
+    static func shWrappedCommand(_ command: String) -> String {
         let escaped = command.replacingOccurrences(of: "'", with: "'\\''")
         return "/bin/sh -c '\(pathExport); exec \(escaped)'"
     }

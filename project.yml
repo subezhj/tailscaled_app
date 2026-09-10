@@ -220,6 +220,7 @@ targets:
       - target: Heeler
       - package: HeelerSSH
       - package: GhosttyTerminal
+      - package: TailscaleKit
 
 schemes:
   Heeler:

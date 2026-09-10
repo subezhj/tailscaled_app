@@ -57,13 +57,24 @@ struct LuvusTransport: Transport {
     // MARK: - Honest "not wired up yet" for the remaining required methods
 
     /// UHP's event stream exists but this build has not mapped the wire
-    /// shapes yet; a luvus Host must not claim a live Console feed it cannot
-    /// deliver.
+    /// shapes yet. A luvus Host must not claim a live Console feed it cannot
+    /// deliver — but it also must not fail the connection: returning a stream
+    /// that never emits (and never ends) keeps the Host in `.connected` state
+    /// so the Console shows it as reachable, and only the event-driven
+    /// surfaces (status deltas) stay quiet. If an empty stream were instead an
+    /// error, the reconnect loop would classify it as a terminal transport
+    /// failure and mark the whole Host down — the "connection dropped" a
+    /// luvus Host currently reports.
     func subscribeToEvents(_ subscriptions: [EventSubscription]) async throws
         -> HerdrEventStream
     {
-        throw TransportError.channelFailed(
-            detail: "luvus event streaming is not wired up yet.")
+        HerdrEventStream(
+            events: AsyncThrowingStream { continuation in
+                // Never yields, never finishes; `end()` is a no-op the caller
+                // owns for symmetric teardown.
+                continuation.onTermination = { _ in }
+            },
+            ender: {})
     }
 
     func attachTerminal(_ request: TerminalAttachRequest) async throws

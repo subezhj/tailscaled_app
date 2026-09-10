@@ -72,10 +72,9 @@ struct ConsoleView: View {
         // projection of it, so notification deep links keep working.
         NavigationSplitView {
             content
-                .safeAreaInset(edge: .top, spacing: 0) {
-                    hostFilterTabBar
-                }
-                .safeAreaInset(edge: .top, spacing: 0) {
+                .overlay(alignment: .top) {
+                    // Floats above the list instead of pushing it down, so
+                    // the relay hint never steals space from Agents.
                     derpRelayHint
                 }
                 .navigationTitle("Agents")
@@ -98,19 +97,50 @@ struct ConsoleView: View {
                         .accessibilityValue(
                             audioKeeper.isActive ? "On" : "Off")
                     }
-                    // A filter is meaningless with a single Host.
-                    if hosts.enabledHosts.count > 1 {
+                    // All-Hosts filtering + per-Host enable/disable. The
+                    // menu doubles as the Host switcher: the Picker narrows
+                    // the Agent list to one Host, and the toggles below hide
+                    // a Host's Agents everywhere (list + terminal switcher)
+                    // without leaving this surface. A disabled Host renders
+                    // in a separate section so it can be re-enabled without
+                    // hunting.
+                    if hosts.enabledHosts.count > 1 || hosts.hosts.count > 1 {
                         ToolbarItem(placement: .primaryAction) {
                             Menu(
-                                "Filter by Host",
-                                systemImage: hostFilter == nil
-                                    ? "line.3.horizontal.decrease.circle"
-                                    : "line.3.horizontal.decrease.circle.fill"
+                                "All Hosts",
+                                systemImage: "server.rack"
                             ) {
                                 Picker("Host", selection: $hostFilter) {
                                     Text("All Hosts").tag(Host.ID?.none)
-                                    ForEach(hosts.enabledHosts) { host in
-                                        Text(host.displayName).tag(Host.ID?.some(host.id))
+                                    ForEach(
+                                        hostFilterStore.enabledHosts(from: hosts.hosts)
+                                    ) { host in
+                                        Text(host.displayName)
+                                            .tag(Host.ID?.some(host.id))
+                                    }
+                                }
+                                if !hostFilterStore.enabledHosts(from: hosts.hosts)
+                                    .isEmpty
+                                {
+                                    Divider()
+                                    Text("Show Agents")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    ForEach(hosts.hosts) { host in
+                                        Toggle(
+                                            host.displayName,
+                                            systemImage: "server.rack",
+                                            isOn: Binding(
+                                                get: {
+                                                    hostFilterStore.isEnabled(host.id)
+                                                },
+                                                set: { enabled in
+                                                    hostFilterStore.setEnabled(
+                                                        enabled, for: host.id)
+                                                    if !enabled, hostFilter == host.id {
+                                                        hostFilter = nil
+                                                    }
+                                                }))
                                     }
                                 }
                             }
@@ -286,88 +316,6 @@ struct ConsoleView: View {
         return address.lowercased().hasPrefix("fd7a:115c:a1e0")
     }
 
-    /// The Host-category strip above the Agent list: an All-Hosts chip plus
-    /// one chip per enabled Host. Tapping a Host chip narrows the list to
-    /// that Host; long-pressing toggles the Host enabled/disabled (disabled
-    /// chips render greyed out and their Agents disappear everywhere). A
-    /// disabled Host's chip stays visible so it can be re-enabled without
-    /// visiting Settings.
-    private var hostFilterTabBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 8) {
-                hostFilterChip(
-                    title: "All",
-                    systemImage: "square.stack.3d.up",
-                    selected: hostFilter == nil) {
-                        hostFilter = nil
-                    }
-                ForEach(hosts.enabledHosts) { host in
-                    let enabled = hostFilterStore.isEnabled(host.id)
-                    hostFilterChip(
-                        title: host.displayName,
-                        systemImage: enabled
-                            ? (hostFilter == host.id
-                                ? "server.rack.fill" : "server.rack")
-                            : "server.rack",
-                        selected: hostFilter == host.id,
-                        disabled: !enabled,
-                        contextMenu: {
-                            Button(enabled ? "Disable Host" : "Enable Host") {
-                                withAnimation(.snappy) {
-                                    hostFilterStore.toggle(host.id)
-                                    if hostFilter == host.id {
-                                        hostFilter = nil
-                                    }
-                                }
-                            }
-                            Button("Host Settings", systemImage: "slider.horizontal.3") {
-                                presentHosts(host.id)
-                            }
-                        },
-                        action: {
-                            hostFilter = enabled ? host.id : nil
-                        })
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-        }
-        .background(
-            Color(uiColor: .systemBackground)
-                .opacity(0.92))
-    }
-
-    private func hostFilterChip(
-        title: String,
-        systemImage: String,
-        selected: Bool,
-        disabled: Bool = false,
-        @ViewBuilder contextMenu: @escaping () -> some View = { EmptyView() },
-        action: @escaping () -> Void
-    ) -> some View {
-        Button(action: action) {
-            HStack(spacing: 6) {
-                Image(systemName: systemImage)
-                Text(title)
-                    .lineLimit(1)
-            }
-            .font(.footnote.weight(.medium))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-                Capsule()
-                    .fill(selected
-                        ? Color.accentColor.opacity(0.9)
-                        : Color(uiColor: .secondarySystemBackground)))
-            .foregroundStyle(
-                disabled ? Color.secondary
-                    : selected ? Color.white : Color.primary)
-        }
-        .buttonStyle(.plain)
-        .disabled(disabled && !selected)
-        .contextMenu { contextMenu() }
-    }
-
     /// A banner shown when a tailnet Host's peer is reachable only through a
     /// DERP relay (slow) rather than a direct P2P path (fast). This is not an
     /// error — the connection works — just a hint that switching to a network
@@ -402,9 +350,18 @@ struct ConsoleView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
+                // Glass card floating above the list: it must not push
+                // Agents down, and it stays tappable over the list it sits
+                // on. Material keeps it legible over any row beneath.
                 .background(
-                    Color(uiColor: .secondarySystemBackground)
-                        .opacity(0.9))
+                    .regularMaterial,
+                    in: .rect(cornerRadius: 12))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(Color.secondary.opacity(0.25), lineWidth: 0.5))
+                .padding(.horizontal, 10)
+                .padding(.top, 6)
+                .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
             }
         }
         .animation(.snappy, value: relayedHostHint?.hostID)
